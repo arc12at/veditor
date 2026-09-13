@@ -8,7 +8,7 @@ from app import models
 from app.auth import hash_api_key
 from app.db import SessionLocal, get_db
 from app.main import app
-from app.storage import INTERMEDIATE_STAGES, StorageBackend, get_storage_backend
+from app.storage import INTERMEDIATE_STAGES, get_storage_backend
 
 
 @pytest.fixture
@@ -108,12 +108,20 @@ def db_session():
         try:
             db.rollback()
 
-            for obj in created:
+            for obj in reversed(created):
                 try:
                     insp = inspect(obj)
                     if insp and insp.has_identity and insp.identity:
                         obj_id = insp.identity[0]
-                        if isinstance(obj, models.Talk):
+                        if isinstance(obj, models.Job):
+                            db.query(models.Job).filter(
+                                models.Job.id == obj_id
+                            ).delete()
+                        elif isinstance(obj, models.Review):
+                            db.query(models.Review).filter(
+                                models.Review.id == obj_id
+                            ).delete()
+                        elif isinstance(obj, models.Talk):
                             db.query(models.Job).filter(
                                 models.Job.talk_id == obj_id
                             ).delete()
@@ -128,12 +136,38 @@ def db_session():
                                 models.Client.id == obj_id
                             ).delete()
                         elif isinstance(obj, models.Event):
+                            talk_ids = [
+                                t[0]
+                                for t in db.query(models.Talk.id)
+                                .filter(models.Talk.event_id == obj_id)
+                                .all()
+                            ]
+                            if talk_ids:
+                                db.query(models.Job).filter(
+                                    models.Job.talk_id.in_(talk_ids)
+                                ).delete()
+                                db.query(models.Review).filter(
+                                    models.Review.talk_id.in_(talk_ids)
+                                ).delete()
+                                db.query(models.Talk).filter(
+                                    models.Talk.id.in_(talk_ids)
+                                ).delete()
                             db.query(models.Event).filter(
                                 models.Event.id == obj_id
                             ).delete()
-                except Exception:  # noqa: BLE001, S110
-                    pass
-            db.commit()
+                        elif isinstance(obj, models.User):
+                            db.query(models.Review).filter(
+                                models.Review.user_id == obj_id
+                            ).delete()
+                            db.query(models.Event).filter(
+                                models.Event.created_by_user_id == obj_id
+                            ).update({"created_by_user_id": None})
+                            db.query(models.User).filter(
+                                models.User.id == obj_id
+                            ).delete()
+                        db.commit()
+                except Exception:  # noqa: BLE001
+                    db.rollback()
         except Exception:  # noqa: BLE001
             db.rollback()
         finally:
@@ -328,38 +362,45 @@ def test_media_serving(client: TestClient, db_session, tmp_path):
     db_session.refresh(talk)
 
     clip = generate_clip(0.5, output_dir=tmp_path)
-    storage: StorageBackend = app.dependency_overrides.get(
-        get_storage_backend, get_storage_backend()
-    )
-    storage.put(f"{talk.id}/preview/preview.mp4", clip)
+    from app.storage import LocalDiskBackend
 
-    # Unauthenticated returns 401
-    assert client.get(f"/studio/media/{talk.id}/preview.mp4").status_code == 401
+    test_storage = LocalDiskBackend(tmp_path)
+    app.dependency_overrides[get_storage_backend] = lambda: test_storage
+    try:
+        test_storage.put(f"{talk.id}/preview/preview.mp4", clip)
 
-    response = client.get(
-        f"/studio/media/{talk.id}/preview.mp4", headers={"X-API-Key": api_key}
-    )
-    assert response.status_code == 200
-    assert response.headers.get("cache-control") == "no-store"
-    assert "video/mp4" in response.headers.get("content-type", "")
+        # Unauthenticated returns 401
+        assert client.get(f"/studio/media/{talk.id}/preview.mp4").status_code == 401
 
-    # Categorized media route also includes no-store
-    response_cat = client.get(
-        f"/studio/media/{talk.id}/preview/preview.mp4", headers={"X-API-Key": api_key}
-    )
-    assert response_cat.status_code == 200
-    assert response_cat.headers.get("cache-control") == "no-store"
+        response = client.get(
+            f"/studio/media/{talk.id}/preview.mp4", headers={"X-API-Key": api_key}
+        )
+        assert response.status_code == 200
+        assert response.headers.get("cache-control") == "no-store"
+        assert "video/mp4" in response.headers.get("content-type", "")
 
-    not_found = client.get(
-        f"/studio/media/{talk.id}/missing.mp4", headers={"X-API-Key": api_key}
-    )
-    assert not_found.status_code == 404
+        # Categorized media route also includes no-store
+        response_cat = client.get(
+            f"/studio/media/{talk.id}/preview/preview.mp4",
+            headers={"X-API-Key": api_key},
+        )
+        assert response_cat.status_code == 200
+        assert response_cat.headers.get("cache-control") == "no-store"
 
-    # Disallowed category returns 404
-    disallowed = client.get(
-        f"/studio/media/{talk.id}/logs/worker.log", headers={"X-API-Key": api_key}
-    )
-    assert disallowed.status_code == 404
+        not_found = client.get(
+            f"/studio/media/{talk.id}/missing.mp4", headers={"X-API-Key": api_key}
+        )
+        assert not_found.status_code == 404
+
+        # Disallowed category returns 404
+        disallowed = client.get(
+            f"/studio/media/{talk.id}/logs/worker.log", headers={"X-API-Key": api_key}
+        )
+        assert disallowed.status_code == 404
+    finally:
+        test_storage.delete(f"{talk.id}")
+        clip.unlink(missing_ok=True)
+        app.dependency_overrides.pop(get_storage_backend, None)
 
 
 def test_talk_patch_metadata(client: TestClient, db_session):
@@ -478,7 +519,7 @@ def test_talk_bulk_delete(client: TestClient, db_session):
     assert res.json()["deleted_count"] == 2
 
 
-def test_talk_upload_recording(client: TestClient, db_session):
+def test_talk_upload_recording(client: TestClient, db_session, tmp_path):
     from unittest.mock import patch
 
     event = models.Event(name=f"Event {uuid.uuid4().hex}")
@@ -506,7 +547,7 @@ def test_talk_upload_recording(client: TestClient, db_session):
 
     from tests.conftest import generate_clip
 
-    clip = generate_clip(0.5)
+    clip = generate_clip(0.5, output_dir=tmp_path)
     with patch("app.routes.talks.light_queue") as mock_queue, open(clip, "rb") as f_vid:
         res = client.post(
             f"/talks/{talk.id}/upload",

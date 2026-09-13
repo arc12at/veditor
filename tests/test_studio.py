@@ -17,6 +17,16 @@ def client():
     return TestClient(app)
 
 
+@pytest.fixture
+def temp_storage(tmp_path):
+    storage = LocalDiskBackend(tmp_path)
+    app.dependency_overrides[get_storage_backend] = lambda: storage
+    try:
+        yield storage
+    finally:
+        app.dependency_overrides.pop(get_storage_backend, None)
+
+
 def test_root_redirect(client: TestClient):
     response = client.get("/", follow_redirects=False)
     assert response.status_code == 307
@@ -108,58 +118,75 @@ def db_session():
     finally:
         try:
             db.rollback()
+            errors = []
 
             for obj in reversed(created):
-                insp = inspect(obj)
-                if insp and insp.has_identity and insp.identity:
-                    obj_id = insp.identity[0]
-                    if isinstance(obj, models.Job):
-                        db.query(models.Job).filter(models.Job.id == obj_id).delete()
-                    elif isinstance(obj, models.Review):
-                        db.query(models.Review).filter(
-                            models.Review.id == obj_id
-                        ).delete()
-                    elif isinstance(obj, models.Talk):
-                        db.query(models.Job).filter(
-                            models.Job.talk_id == obj_id
-                        ).delete()
-                        db.query(models.Review).filter(
-                            models.Review.talk_id == obj_id
-                        ).delete()
-                        db.query(models.Talk).filter(models.Talk.id == obj_id).delete()
-                    elif isinstance(obj, models.Client):
-                        db.query(models.Client).filter(
-                            models.Client.id == obj_id
-                        ).delete()
-                    elif isinstance(obj, models.Event):
-                        talk_ids = [
-                            t[0]
-                            for t in db.query(models.Talk.id)
-                            .filter(models.Talk.event_id == obj_id)
-                            .all()
-                        ]
-                        if talk_ids:
-                            db.query(models.Job).filter(
-                                models.Job.talk_id.in_(talk_ids)
-                            ).delete()
+                try:
+                    insp = inspect(obj)
+                    if insp and insp.has_identity and insp.identity:
+                        obj_id = insp.identity[0]
+                        if isinstance(obj, models.Job):
+                            db.query(models.Job).filter(models.Job.id == obj_id).delete(
+                                synchronize_session=False
+                            )
+                        elif isinstance(obj, models.Review):
                             db.query(models.Review).filter(
-                                models.Review.talk_id.in_(talk_ids)
-                            ).delete()
+                                models.Review.id == obj_id
+                            ).delete(synchronize_session=False)
+                        elif isinstance(obj, models.Talk):
+                            db.query(models.Job).filter(
+                                models.Job.talk_id == obj_id
+                            ).delete(synchronize_session=False)
+                            db.query(models.Review).filter(
+                                models.Review.talk_id == obj_id
+                            ).delete(synchronize_session=False)
                             db.query(models.Talk).filter(
-                                models.Talk.id.in_(talk_ids)
-                            ).delete()
-                        db.query(models.Event).filter(
-                            models.Event.id == obj_id
-                        ).delete()
-                    elif isinstance(obj, models.User):
-                        db.query(models.Review).filter(
-                            models.Review.user_id == obj_id
-                        ).delete()
-                        db.query(models.Event).filter(
-                            models.Event.created_by_user_id == obj_id
-                        ).update({"created_by_user_id": None})
-                        db.query(models.User).filter(models.User.id == obj_id).delete()
-                    db.commit()
+                                models.Talk.id == obj_id
+                            ).delete(synchronize_session=False)
+                        elif isinstance(obj, models.Client):
+                            db.query(models.Client).filter(
+                                models.Client.id == obj_id
+                            ).delete(synchronize_session=False)
+                        elif isinstance(obj, models.Event):
+                            talk_ids = [
+                                t[0]
+                                for t in db.query(models.Talk.id)
+                                .filter(models.Talk.event_id == obj_id)
+                                .all()
+                            ]
+                            if talk_ids:
+                                db.query(models.Job).filter(
+                                    models.Job.talk_id.in_(talk_ids)
+                                ).delete(synchronize_session=False)
+                                db.query(models.Review).filter(
+                                    models.Review.talk_id.in_(talk_ids)
+                                ).delete(synchronize_session=False)
+                                db.query(models.Talk).filter(
+                                    models.Talk.id.in_(talk_ids)
+                                ).delete(synchronize_session=False)
+                            db.query(models.Event).filter(
+                                models.Event.id == obj_id
+                            ).delete(synchronize_session=False)
+                        elif isinstance(obj, models.User):
+                            db.query(models.Review).filter(
+                                models.Review.user_id == obj_id
+                            ).delete(synchronize_session=False)
+                            db.query(models.Event).filter(
+                                models.Event.created_by_user_id == obj_id
+                            ).update(
+                                {"created_by_user_id": None},
+                                synchronize_session=False,
+                            )
+                            db.query(models.User).filter(
+                                models.User.id == obj_id
+                            ).delete(synchronize_session=False)
+                        db.commit()
+                except Exception as exc:  # noqa: BLE001
+                    db.rollback()
+                    errors.append(exc)
+
+            if errors:
+                raise errors[0]
         except Exception:
             db.rollback()
             raise
@@ -328,7 +355,7 @@ def test_talk_studio_not_found(client: TestClient, db_session):
     assert response.status_code == 404
 
 
-def test_media_serving(client: TestClient, db_session, tmp_path):
+def test_media_serving(client: TestClient, db_session, temp_storage, tmp_path):
     from tests.conftest import generate_clip
 
     event = models.Event(name=f"Event {uuid.uuid4().hex}")
@@ -355,10 +382,8 @@ def test_media_serving(client: TestClient, db_session, tmp_path):
     db_session.refresh(talk)
 
     clip = generate_clip(0.5, output_dir=tmp_path)
-    test_storage = LocalDiskBackend(tmp_path)
-    app.dependency_overrides[get_storage_backend] = lambda: test_storage
     try:
-        test_storage.put(f"{talk.id}/preview/preview.mp4", clip)
+        temp_storage.put(f"{talk.id}/preview/preview.mp4", clip)
 
         # Unauthenticated returns 401
         assert client.get(f"/studio/media/{talk.id}/preview.mp4").status_code == 401
@@ -389,9 +414,7 @@ def test_media_serving(client: TestClient, db_session, tmp_path):
         )
         assert disallowed.status_code == 404
     finally:
-        test_storage.delete(f"{talk.id}")
         clip.unlink(missing_ok=True)
-        app.dependency_overrides.pop(get_storage_backend, None)
 
 
 def test_talk_patch_metadata(client: TestClient, db_session):
@@ -510,7 +533,7 @@ def test_talk_bulk_delete(client: TestClient, db_session):
     assert res.json()["deleted_count"] == 2
 
 
-def test_talk_upload_recording(client: TestClient, db_session, tmp_path):
+def test_talk_upload_recording(client: TestClient, db_session, temp_storage, tmp_path):
     from unittest.mock import patch
 
     event = models.Event(name=f"Event {uuid.uuid4().hex}")
@@ -539,13 +562,13 @@ def test_talk_upload_recording(client: TestClient, db_session, tmp_path):
     from tests.conftest import generate_clip
 
     clip = generate_clip(0.5, output_dir=tmp_path)
-    test_storage = LocalDiskBackend(tmp_path)
-    app.dependency_overrides[get_storage_backend] = lambda: test_storage
+    mock_queue = None
     try:
         with (
-            patch("app.routes.talks.light_queue") as mock_queue,
+            patch("app.routes.talks.light_queue") as mq,
             open(clip, "rb") as f_vid,
         ):
+            mock_queue = mq
             res = client.post(
                 f"/talks/{talk.id}/upload",
                 files={"file": ("recording.mp4", f_vid, "video/mp4")},
@@ -554,15 +577,29 @@ def test_talk_upload_recording(client: TestClient, db_session, tmp_path):
             assert res.status_code == 202
             assert res.json()["status"] == "waiting_for_files"
             mock_queue.enqueue.assert_called_once()
-            enqueued_func = mock_queue.enqueue.call_args[0][0]
+            call_args = mock_queue.enqueue.call_args
+            enqueued_func = (
+                call_args.args[0]
+                if call_args and call_args.args
+                else (call_args.kwargs.get("func") if call_args else None)
+            )
+            assert enqueued_func is not None
             assert enqueued_func.__name__ == "job_ingest"
-            staged_file = mock_queue.enqueue.call_args[0][2]
-            if staged_file:
-                Path(staged_file).unlink(missing_ok=True)
     finally:
-        test_storage.delete(f"{talk.id}")
         clip.unlink(missing_ok=True)
-        app.dependency_overrides.pop(get_storage_backend, None)
+        if mock_queue and mock_queue.enqueue.called:
+            call = mock_queue.enqueue.call_args
+            staged_path = None
+            if call and call.args and len(call.args) > 2:
+                staged_path = call.args[2]
+            elif call and call.kwargs:
+                staged_path = (
+                    call.kwargs.get("file_path")
+                    or call.kwargs.get("staging_path")
+                    or call.kwargs.get("staged_path")
+                )
+            if staged_path:
+                Path(staged_path).unlink(missing_ok=True)
 
 
 def test_import_schedule_json_list(client: TestClient, db_session):

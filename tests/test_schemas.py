@@ -16,6 +16,7 @@ from app.schemas import CutBoundsRequest, _parse_hhmmss
         ("00:30:00", 1800.0),
         ("23:59:59", 86399.0),
         ("23:59:59.999", 86399.999),
+        ("00:00:59.9999999999999999", 60.0),  # long fractional seconds < 60
     ],
 )
 def test_parse_hhmmss_valid(value: str, expected: float):
@@ -48,6 +49,10 @@ def test_parse_hhmmss_out_of_range(value: str):
         "00:00",  # missing seconds segment
         "00:00:00:00",  # extra segment
         "",  # empty string
+        "00:00:00\n",  # trailing newline
+        "00:00:00\r\n",  # trailing CRLF
+        " 00:00:00",  # leading whitespace
+        "00:00:00 ",  # trailing whitespace
     ],
 )
 def test_parse_hhmmss_bad_format(value: str):
@@ -90,3 +95,15 @@ def test_cut_bounds_out_of_range_rejected(cut_start: str, cut_end: str):
     """CutBoundsRequest must propagate _parse_hhmmss range errors as 422."""
     with pytest.raises(ValueError, match="out of range"):
         CutBoundsRequest(cut_start=cut_start, cut_end=cut_end)
+
+
+def test_cut_bounds_newline_rejected():
+    with pytest.raises(ValueError, match="Invalid time format"):
+        CutBoundsRequest(cut_start="00:00:00\n", cut_end="00:01:00")
+
+
+def test_cut_bounds_high_precision_seconds_accepted():
+    req = CutBoundsRequest(cut_start="00:00:00", cut_end="00:00:59.9999999999999999")
+    start, end = req.parsed_seconds()
+    assert start == 0.0
+    assert end == pytest.approx(60.0, abs=1e-6)

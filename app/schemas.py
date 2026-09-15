@@ -1,5 +1,6 @@
 import re
 from datetime import UTC, datetime
+from decimal import Decimal
 from enum import Enum
 from typing import Any, Literal
 from urllib.parse import urlsplit
@@ -259,7 +260,7 @@ class ApproveRequest(BaseModel):
     decision: Literal["approve", "reject"] = "approve"
 
 
-HHMMSS_PATTERN = re.compile(r"^\d{2}:\d{2}:\d{2}(?:\.\d+)?$")
+HHMMSS_PATTERN = re.compile(r"^\d{2}:\d{2}:\d{2}(?:\.\d+)?\Z")
 
 
 def _parse_hhmmss(value: str) -> float:
@@ -268,17 +269,17 @@ def _parse_hhmmss(value: str) -> float:
     Raises ValueError for strings that don't match HH:MM:SS and for
     out-of-range components (HH ≥ 24, MM ≥ 60, SS ≥ 60).
     """
-    if not isinstance(value, str) or not HHMMSS_PATTERN.match(value):
+    if not isinstance(value, str) or not HHMMSS_PATTERN.fullmatch(value):
         raise ValueError(f"Invalid time format '{value}', expected HH:MM:SS")
     hh_str, mm_str, ss_str = value.split(":")
     hh, mm = int(hh_str), int(mm_str)
-    ss = float(ss_str)
+    ss = Decimal(ss_str)
     if hh >= 24 or mm >= 60 or ss >= 60:
         raise ValueError(
             f"Time components out of range in '{value}' "
             "(HH must be 0–23, MM 0–59, SS 0–59)"
         )
-    return hh * 3600 + mm * 60 + ss
+    return hh * 3600 + mm * 60 + float(ss)
 
 
 class CutBoundsRequest(BaseModel):

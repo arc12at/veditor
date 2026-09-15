@@ -882,6 +882,7 @@ def _make_pending_bounds_talk_db():
         ("00:60:00", "01:00:00"),  # MM == 60
         ("00:00:60", "00:01:00"),  # SS == 60
         ("99:99:99", "99:99:99"),  # everything out of range
+        ("00:00:00\n", "00:01:00"),  # trailing newline rejected
     ],
 )
 def test_submit_cut_bounds_out_of_range_returns_422(cut_start: str, cut_end: str):

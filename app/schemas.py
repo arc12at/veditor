@@ -263,8 +263,8 @@ class ApproveRequest(BaseModel):
 HHMMSS_PATTERN = re.compile(r"^\d{2}:\d{2}:\d{2}(?:\.\d+)?\Z")
 
 
-def _parse_hhmmss(value: str) -> float:
-    """Parse HH:MM:SS (with optional subseconds) into total seconds (float).
+def _parse_hhmmss(value: str) -> Decimal:
+    """Parse HH:MM:SS (with optional subseconds) into total seconds (Decimal).
 
     Raises ValueError for strings that don't match HH:MM:SS and for
     out-of-range components (HH ≥ 24, MM ≥ 60, SS ≥ 60).
@@ -279,7 +279,7 @@ def _parse_hhmmss(value: str) -> float:
             f"Time components out of range in '{value}' "
             "(HH must be 0–23, MM 0–59, SS 0–59)"
         )
-    return hh * 3600 + mm * 60 + float(ss)
+    return hh * 3600 + mm * 60 + ss
 
 
 class CutBoundsRequest(BaseModel):
@@ -295,7 +295,7 @@ class CutBoundsRequest(BaseModel):
         return self
 
     def parsed_seconds(self) -> tuple[float, float]:
-        return _parse_hhmmss(self.cut_start), _parse_hhmmss(self.cut_end)
+        return float(_parse_hhmmss(self.cut_start)), float(_parse_hhmmss(self.cut_end))
 
 
 class IntroOutroRequest(BaseModel):

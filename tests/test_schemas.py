@@ -16,11 +16,14 @@ from app.schemas import CutBoundsRequest, _parse_hhmmss
         ("00:30:00", 1800.0),
         ("23:59:59", 86399.0),
         ("23:59:59.999", 86399.999),
-        ("00:00:59.9999999999999999", 60.0),  # long fractional seconds < 60
     ],
 )
 def test_parse_hhmmss_valid(value: str, expected: float):
-    assert _parse_hhmmss(value) == pytest.approx(expected, abs=1e-6)
+    assert float(_parse_hhmmss(value)) == pytest.approx(expected, abs=1e-6)
+
+
+def test_parse_hhmmss_sub_second_less_than_next_whole_second():
+    assert _parse_hhmmss("00:00:59.9999999999999999") < _parse_hhmmss("00:01:00")
 
 
 @pytest.mark.parametrize(
@@ -107,3 +110,8 @@ def test_cut_bounds_high_precision_seconds_accepted():
     start, end = req.parsed_seconds()
     assert start == 0.0
     assert end == pytest.approx(60.0, abs=1e-6)
+
+
+def test_cut_bounds_high_precision_ordering_preserved():
+    req = CutBoundsRequest(cut_start="00:00:59.9999999999999999", cut_end="00:01:00")
+    assert _parse_hhmmss(req.cut_start) < _parse_hhmmss(req.cut_end)

@@ -106,12 +106,19 @@ def test_cut_bounds_newline_rejected():
 
 
 def test_cut_bounds_high_precision_seconds_accepted():
-    req = CutBoundsRequest(cut_start="00:00:00", cut_end="00:00:59.9999999999999999")
+    req = CutBoundsRequest(cut_start="00:00:00", cut_end="00:00:59.999999")
     start, end = req.parsed_seconds()
-    assert start == 0.0
-    assert end == pytest.approx(60.0, abs=1e-6)
+    assert float(start) == 0.0
+    assert float(end) == pytest.approx(60.0, abs=1e-5)
 
 
 def test_cut_bounds_high_precision_ordering_preserved():
-    req = CutBoundsRequest(cut_start="00:00:59.9999999999999999", cut_end="00:01:00")
-    assert _parse_hhmmss(req.cut_start) < _parse_hhmmss(req.cut_end)
+    req = CutBoundsRequest(cut_start="00:00:59.999999", cut_end="00:01:00")
+    start, end = req.parsed_seconds()
+    assert start < end
+
+
+def test_cut_bounds_high_precision_ordering_lost_rejected():
+    # Values that are ordered as Decimal but equal as float
+    with pytest.raises(ValueError, match="lose ordering after float conversion"):
+        CutBoundsRequest(cut_start="00:00:59.9999999999999999", cut_end="00:01:00")

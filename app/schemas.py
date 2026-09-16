@@ -292,6 +292,11 @@ class CutBoundsRequest(BaseModel):
         end_s = _parse_hhmmss(self.cut_end)
         if end_s <= start_s:
             raise ValueError("cut_end must be greater than cut_start")
+
+        if float(end_s) <= float(start_s):
+            raise ValueError(
+                "cut_end must be greater than cut_start (values are too close and lose ordering after float conversion)"
+            )
         return self
 
     def parsed_seconds(self) -> tuple[float, float]:

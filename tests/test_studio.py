@@ -1,16 +1,21 @@
 import json
+import re
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import inspect
 
 from app import models
 from app.auth import hash_api_key
 from app.db import SessionLocal, get_db
 from app.main import app
+from app.security import create_session_token, create_sso_token
 from app.storage import INTERMEDIATE_STAGES, LocalDiskBackend, get_storage_backend
+from tests.conftest import generate_clip
 
 
 @pytest.fixture
@@ -65,9 +70,6 @@ def test_static_assets(client: TestClient):
 
 
 def test_templates_have_no_inline_css_or_js():
-    import re
-    from pathlib import Path
-
     templates_dir = Path(__file__).parent.parent / "app" / "ui" / "templates"
     assert templates_dir.is_dir()
 
@@ -102,8 +104,6 @@ def test_templates_have_no_inline_css_or_js():
 
 @pytest.fixture
 def db_session():
-    from sqlalchemy import inspect
-
     db = SessionLocal()
     app.dependency_overrides[get_db] = lambda: db
     created = []
@@ -273,8 +273,6 @@ def test_talk_studio_page(client: TestClient, db_session):
 
 
 def test_talk_studio_human_session_user_access(client: TestClient, db_session):
-    from app.security import create_session_token
-
     org = models.User(
         email=f"org_{uuid.uuid4().hex[:8]}@example.com",
         hashed_password="hash",
@@ -360,8 +358,6 @@ def test_talk_studio_not_found(client: TestClient, db_session):
 
 
 def test_media_serving(client: TestClient, db_session, temp_storage, tmp_path):
-    from tests.conftest import generate_clip
-
     event = models.Event(name=f"Event {uuid.uuid4().hex}")
     db_session.add(event)
     db_session.commit()
@@ -422,8 +418,6 @@ def test_media_serving(client: TestClient, db_session, temp_storage, tmp_path):
 
 
 def test_talk_waveform_endpoint(client: TestClient, db_session, temp_storage, tmp_path):
-    from tests.conftest import generate_clip
-
     event = models.Event(name=f"Waveform Event {uuid.uuid4().hex}")
     db_session.add(event)
     db_session.commit()
@@ -629,8 +623,6 @@ def test_talk_bulk_delete(client: TestClient, db_session):
 
 
 def test_talk_upload_recording(client: TestClient, db_session, temp_storage, tmp_path):
-    from unittest.mock import patch
-
     event = models.Event(name=f"Event {uuid.uuid4().hex}")
     db_session.add(event)
     db_session.commit()
@@ -653,8 +645,6 @@ def test_talk_upload_recording(client: TestClient, db_session, temp_storage, tmp
     db_session.add(talk)
     db_session.commit()
     db_session.refresh(talk)
-
-    from tests.conftest import generate_clip
 
     clip = generate_clip(0.5, output_dir=tmp_path)
     mock_queue = None
@@ -910,10 +900,6 @@ def test_ui_reject_talk_cleans_up_intermediates(
     client: TestClient, db_session, fake_storage
 ):
     """Rejecting a talk in review removes cut/ and preview/ while preserving raw/."""
-    import uuid
-
-    from app.auth import hash_api_key
-
     event = models.Event(name=f"Reject Event {uuid.uuid4().hex}")
     db_session.add(event)
     db_session.commit()
@@ -963,11 +949,6 @@ def test_ui_reject_talk_cleans_up_intermediates(
 
 def test_ui_reject_talk_storage_delete_resilient(client: TestClient, db_session):
     """Storage deletion failure on talk rejection does not raise 500."""
-    import uuid
-    from unittest.mock import MagicMock
-
-    from app.auth import hash_api_key
-
     event = models.Event(name=f"Reject Err Event {uuid.uuid4().hex}")
     db_session.add(event)
     db_session.commit()
@@ -1200,8 +1181,6 @@ def test_import_schedule_end_time_only(client: TestClient, db_session):
 
 def test_delete_talk_propagates_storage_error(client: TestClient, db_session):
     """When storage fails during talk deletion, an error is raised and the record is not deleted."""
-    from unittest.mock import MagicMock
-
     event = models.Event(name=f"Event {uuid.uuid4().hex}")
     db_session.add(event)
     db_session.commit()
@@ -1230,8 +1209,6 @@ def test_delete_talk_propagates_storage_error(client: TestClient, db_session):
 
     app.dependency_overrides[get_storage_backend] = lambda: mock_storage
     try:
-        import pytest
-
         with pytest.raises(RuntimeError, match="Cleanup failed"):
             client.delete(f"/talks/{talk.id}", headers={"X-API-Key": api_key})
 
@@ -1309,8 +1286,6 @@ def test_studio_mode_body_class(client: TestClient, db_session):
 
 def test_studio_speaker_timeline_omits_bumpers(client: TestClient, db_session):
     """When viewed with a speaker token, studio scrubber omits INTRO/OUTRO and enables speaker mode."""
-    from app.security import create_sso_token
-
     event = models.Event(name=f"Event {uuid.uuid4().hex}")
     db_session.add(event)
     db_session.commit()
@@ -1347,8 +1322,6 @@ def test_studio_speaker_timeline_omits_bumpers(client: TestClient, db_session):
 
 def test_studio_organizer_timeline_omits_bumpers(client: TestClient, db_session):
     """When viewed by an organizer, studio scrubber also omits INTRO and OUTRO bumper blocks from timeline."""
-    from app.security import create_session_token
-
     org = models.User(
         email=f"org_{uuid.uuid4().hex[:8]}@example.com",
         hashed_password="hash",
@@ -1391,8 +1364,6 @@ def test_studio_organizer_timeline_omits_bumpers(client: TestClient, db_session)
 
 
 def test_studio_upload_pending_state_hides_timeline(client: TestClient, db_session):
-    from app.security import create_session_token
-
     org = models.User(
         email=f"org_{uuid.uuid4().hex[:8]}@example.com",
         hashed_password="hash",

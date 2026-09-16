@@ -57,7 +57,7 @@ def _get_safe_redirect_target(target: str | None, default: str = "/studio") -> s
     if not unquoted_path.startswith("/") or unquoted_path.startswith(("//", "/\\")):
         return default
 
-    normalized_path = parsed.path.rstrip("/")
+    normalized_path = parsed.path.rstrip("/").lower()
     if normalized_path in ("/login", "/logout", "/signup"):
         return default
 

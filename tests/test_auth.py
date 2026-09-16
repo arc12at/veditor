@@ -3,13 +3,30 @@ from typing import Annotated
 from unittest.mock import MagicMock
 
 import pytest
-from fastapi import HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi.testclient import TestClient
 
-from app.auth import get_client, hash_api_key, lock_active_admins, verify_event_access
+from app.auth import (
+    CurrentUser,
+    check_event_access,
+    get_client,
+    get_current_user,
+    hash_api_key,
+    lock_active_admins,
+    require_admin,
+    require_event_access,
+    require_role,
+    require_talk_access,
+    verify_event_access,
+)
 from app.db import SessionLocal, get_db
 from app.main import app
-from app.models import Client, User
-from app.security import hash_password
+from app.models import Client, Event, Talk, User
+from app.security import (
+    create_access_token,
+    create_session_token,
+    hash_password,
+)
 
 
 def test_hash_api_key():
@@ -66,22 +83,6 @@ def test_verify_event_access_out_of_scope():
 # ---------------------------------------------------------------------------
 # CurrentUser Model Tests
 # ---------------------------------------------------------------------------
-
-
-from fastapi import Depends, FastAPI
-from fastapi.testclient import TestClient
-
-from app.auth import (
-    CurrentUser,
-    check_event_access,
-    get_current_user,
-    require_admin,
-    require_event_access,
-    require_role,
-    require_talk_access,
-)
-from app.models import Event, Talk
-from app.security import create_access_token, create_session_token
 
 
 def test_current_user_model_attributes():
@@ -437,9 +438,6 @@ def test_fastapi_route_auth_integration():
     # Override get_db to return a mock DB session
     mock_db = MagicMock()
     mock_db.query.return_value.filter.return_value.first.return_value = mock_event
-
-    from app.db import get_db
-
     test_app.dependency_overrides[get_db] = lambda: mock_db
 
     client = TestClient(test_app)
@@ -529,9 +527,6 @@ def test_require_event_access_query_param_bypass_prevented():
     mock_db.query.return_value.filter.return_value.first.side_effect = [
         mock_event_2,
     ]
-
-    from app.db import get_db
-
     test_app.dependency_overrides[get_db] = lambda: mock_db
     # Caller is authorized for event 1, but requesting /events/2?event_id=1
     client_user = CurrentUser(role="admin", source="api_key", event_ids=[1])
@@ -605,9 +600,6 @@ def test_require_talk_access_success_and_unauthorized():
     mock_talk = Talk(id=10, event_id=1, status="done")
     mock_db = MagicMock()
     mock_db.query.return_value.filter.return_value.first.return_value = mock_talk
-
-    from app.db import get_db
-
     test_app.dependency_overrides[get_db] = lambda: mock_db
 
     # Authorized user (admin)
@@ -630,6 +622,7 @@ def test_require_talk_access_success_and_unauthorized():
 def test_login_routes_next_redirect_and_open_redirect_protection():
     db = SessionLocal()
     app.dependency_overrides[get_db] = lambda: db
+    user = None
 
     try:
         user = User(
@@ -699,7 +692,21 @@ def test_login_routes_next_redirect_and_open_redirect_protection():
         assert resp_malicious_proto.status_code == 303
         assert resp_malicious_proto.headers["location"] == "/studio"
 
-        # 6. Failed login re-renders page preserving next hidden input
+        # 6. Auth loop prevention: case-insensitive auth paths (/Login, /LOGOUT, /Signup) safely default to /studio
+        for auth_target in ("/Login", "/LOGOUT", "/Signup", "/login/", "/Logout/"):
+            resp_loop = client.post(
+                "/login",
+                data={
+                    "email": user.email,
+                    "password": "Pass1234!",
+                    "next": auth_target,
+                },
+                follow_redirects=False,
+            )
+            assert resp_loop.status_code == 303
+            assert resp_loop.headers["location"] == "/studio"
+
+        # 7. Failed login re-renders page preserving next hidden input
         resp_fail = client.post(
             "/login",
             data={
@@ -715,7 +722,11 @@ def test_login_routes_next_redirect_and_open_redirect_protection():
             in resp_fail.text
         )
     finally:
-        db.query(User).filter(User.id == user.id).delete()
-        db.commit()
         app.dependency_overrides.pop(get_db, None)
-        db.close()
+        try:
+            db.rollback()
+            if user is not None and getattr(user, "id", None):
+                db.query(User).filter(User.id == user.id).delete()
+                db.commit()
+        finally:
+            db.close()

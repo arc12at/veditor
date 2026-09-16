@@ -180,6 +180,34 @@ def test_sso_token_studio_dashboard_returns_200(client: TestClient, db_session):
     assert "text/html" in response.headers.get("content-type", "")
 
 
+def test_sso_cookie_session_studio_dashboard_returns_200(
+    client: TestClient, db_session
+):
+    """User with valid event-scoped SSO token in veditor_session cookie accesses /studio directly without query string."""
+    event = models.Event(name="SSO Direct Cookie Event")
+    db_session.add(event)
+    db_session.commit()
+
+    now = datetime.now(tz=UTC)
+    talk = models.Talk(
+        event_id=event.id,
+        title="Scoped SSO Talk",
+        start=now,
+        end=now + timedelta(minutes=30),
+        status="waiting_for_files",
+    )
+    db_session.add(talk)
+    db_session.commit()
+
+    sso_token = create_sso_token("event", event.id, "organizer")
+    client.cookies.set("veditor_session", sso_token)
+
+    response = client.get("/studio", follow_redirects=False)
+    assert response.status_code == 200
+    assert "Scoped SSO Talk" in response.text
+    client.cookies.clear()
+
+
 def test_sso_token_studio_talk_detail_returns_200(client: TestClient, db_session):
     """Valid SSO token allows viewing talk detail without redirection."""
     event = models.Event(name="SSO Talk Event")
@@ -336,6 +364,14 @@ def test_normal_user_accessing_studio_events_redirects_to_studio_with_error(
     response = client.get("/studio/events", follow_redirects=False)
     assert response.status_code == 302
     assert response.headers["location"] == "/studio"
+    assert "httponly" in response.headers.get("set-cookie", "").lower()
+
+    # HTTPS requests carry secure flag
+    resp_https = client.get("https://testserver/studio/events", follow_redirects=False)
+    assert resp_https.status_code == 302
+    cookie_header = resp_https.headers.get("set-cookie", "").lower()
+    assert "httponly" in cookie_header
+    assert "secure" in cookie_header
 
     followed = client.get("/studio/events", follow_redirects=True)
     assert followed.status_code == 200

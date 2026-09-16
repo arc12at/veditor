@@ -253,7 +253,6 @@ def dashboard(
     status_filter: str | None = None,
     q: str | None = None,
     sso_token: str | None = None,
-    error: str | None = None,
 ):
     # 1. Check if landing with ?sso_token=...
     if sso_token is not None or "sso_token" in request.query_params:
@@ -292,11 +291,26 @@ def dashboard(
         )
         return resp
 
-    # 2. Check for active SSO session in cookie
+    # 2. Check for authenticated user or active SSO session in cookie
+    user = _get_authenticated_user_from_cookie(request, db)
     cookie_token = request.cookies.get("veditor_session")
-    sso_user = decode_sso_token(cookie_token) if cookie_token else None
+    sso_user = decode_sso_token(cookie_token) if (not user and cookie_token) else None
 
-    user = None
+    if request.headers.get("X-API-Key") and client is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid API Key. Please verify your credentials.",
+        )
+
+    if not user and not sso_user and client is None:
+        resp = RedirectResponse(
+            url="/login?next=/studio",
+            status_code=status.HTTP_302_FOUND,
+        )
+        if request.cookies.get("veditor_api_key"):
+            resp.delete_cookie("veditor_api_key")
+        return resp
+
     if sso_user:
         if sso_user["scope_type"] == "talk":
             return RedirectResponse(
@@ -314,22 +328,6 @@ def dashboard(
             .filter(models.Talk.event_id == scoped_event_id)
         )
     else:
-        user = _get_authenticated_user_from_cookie(request, db)
-        if request.headers.get("X-API-Key") and client is None:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid API Key. Please verify your credentials.",
-            )
-
-        if not user and client is None:
-            resp = RedirectResponse(
-                url="/login?next=/studio",
-                status_code=status.HTTP_302_FOUND,
-            )
-            if request.cookies.get("veditor_api_key"):
-                resp.delete_cookie("veditor_api_key")
-            return resp
-
         if user:
             if user.role == "admin":
                 user_events = (
@@ -431,7 +429,7 @@ def dashboard(
         "broken": status_counts.get("broken", 0) + status_counts.get("rejected", 0),
     }
 
-    flash_error = request.cookies.get("flash_error") or error
+    flash_error = request.cookies.get("flash_error")
 
     response = templates.TemplateResponse(
         request,
@@ -629,10 +627,8 @@ def studio(
         return resp
 
     user = _get_authenticated_user_from_cookie(request, db)
-    raw_sso = sso_token or request.query_params.get("sso_token")
     cookie_token = request.cookies.get("veditor_session")
-    sso_token_str = raw_sso or cookie_token
-    sso_user = decode_sso_token(sso_token_str) if sso_token_str else None
+    sso_user = decode_sso_token(cookie_token) if cookie_token else None
 
     if "api_key" in request.query_params:
         raise HTTPException(
@@ -748,6 +744,9 @@ def list_studio_events(
         )
 
     if user.role not in ("organizer", "admin"):
+        is_secure = (request.url.scheme == "https") or (
+            settings.environment.lower() in ("production", "prod")
+        )
         resp = RedirectResponse(
             url="/studio",
             status_code=status.HTTP_302_FOUND,
@@ -757,8 +756,9 @@ def list_studio_events(
             value="You do not have the permission to access that page",
             max_age=10,
             path="/",
-            httponly=False,
+            httponly=True,
             samesite="lax",
+            secure=is_secure,
         )
         return resp
 

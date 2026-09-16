@@ -594,6 +594,8 @@ def test_concurrent_reviews_atomic_transition_and_single_review():
         start=datetime(2026, 9, 1, 10, 0, tzinfo=UTC),
         end=datetime(2026, 9, 1, 10, 30, tzinfo=UTC),
         status="preview",
+        cut_start=10.0,
+        cut_end=60.0,
     )
     db.add(talk)
     db.commit()

@@ -991,6 +991,72 @@ document.addEventListener('DOMContentLoaded', () => {
   const currentTalkStatus = getTalkStatus();
   const currentTalkId = getTalkId();
 
+  const editBtn = document.getElementById('btn-edit-talk-studio');
+  const editModal = document.getElementById('modal-edit-talk-studio');
+  if (editBtn && editModal) {
+    editBtn.addEventListener('click', () => {
+      const shell = getStudioShell();
+      if (!shell) return;
+      document.getElementById('edit-talk-title').value = shell.dataset.talkTitle || '';
+      document.getElementById('edit-talk-room').value = shell.dataset.talkRoom || '';
+      document.getElementById('edit-talk-start').value = shell.dataset.talkStart || '';
+      document.getElementById('edit-talk-end').value = shell.dataset.talkEnd || '';
+      editModal.style.display = 'flex';
+    });
+
+    editModal.querySelectorAll('.btn-close-edit-talk, .dashboard-modal-close').forEach(b => {
+      b.addEventListener('click', () => { editModal.style.display = 'none'; });
+    });
+    editModal.addEventListener('click', e => {
+      if (e.target === editModal) editModal.style.display = 'none';
+    });
+
+    const submitBtn = document.getElementById('btn-submit-edit-talk-studio');
+    if (submitBtn) {
+      submitBtn.addEventListener('click', async () => {
+        const title = document.getElementById('edit-talk-title').value.trim();
+        const room = document.getElementById('edit-talk-room').value;
+        const startVal = document.getElementById('edit-talk-start').value;
+        const endVal = document.getElementById('edit-talk-end').value;
+
+        if (!title) {
+          alert('Talk title is required.');
+          return;
+        }
+        if (startVal && endVal && new Date(endVal) <= new Date(startVal)) {
+          alert('End time must be after start time.');
+          return;
+        }
+
+        const orig = submitBtn.innerHTML;
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<span class="spinner spinner-sm"></span> Saving...';
+
+        try {
+          const payload = { title, room };
+          if (startVal) payload.start = new Date(startVal).toISOString();
+          if (endVal) payload.end = new Date(endVal).toISOString();
+
+          const res = await (window.authFetch || fetch)(`/talks/${currentTalkId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || `Server returned ${res.status}`);
+          }
+          window.location.reload();
+        } catch (err) {
+          alert(`Failed to update talk: ${err.message}`);
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = orig;
+        }
+      });
+    }
+  }
+
   if (activeProcessingStates.includes(currentTalkStatus) && currentTalkId) {
     const pollInterval = setInterval(async () => {
       try {

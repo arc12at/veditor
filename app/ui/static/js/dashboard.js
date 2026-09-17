@@ -210,7 +210,6 @@ window.submitAttachRoomRecording = async function() {
   const roomInput = (document.getElementById('attach-room-input') || {}).value || '';
   const fileInput = document.getElementById('attach-room-file');
   const btn = document.getElementById('btn-submit-attach-room');
-  const orig = btn ? btn.innerHTML : '';
 
   if (!roomInput.trim()) {
     alert('Please enter or select a room name.');
@@ -221,7 +220,7 @@ window.submitAttachRoomRecording = async function() {
     return;
   }
 
-  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner spinner-sm"></span> Attaching to Room Talks...'; }
+  setBtnBusy(btn, true, 'Attaching to Room Talks...');
 
   try {
     const fd = new FormData();
@@ -250,7 +249,7 @@ window.submitAttachRoomRecording = async function() {
   } catch (err) {
     alert(`Attachment failed: ${err.message}`);
   } finally {
-    if (btn) { btn.disabled = false; btn.innerHTML = orig; }
+    setBtnBusy(btn, false);
   }
 };
 
@@ -292,21 +291,42 @@ window.openEditTalkModal = function(row) {
   if (t) t.value = row.dataset.title || '';
   const r = document.getElementById('quick-talk-room');
   if (r) r.value = row.dataset.room || '';
+  const toLocalInputFormat = (isoString) => {
+    if (!isoString) return '';
+    const d = new Date(isoString);
+    if (isNaN(d.getTime())) return '';
+    return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  };
+
   const s = document.getElementById('quick-talk-start');
-  if (s) s.value = row.dataset.start || '';
+  if (s) s.value = toLocalInputFormat(row.dataset.start);
   const e = document.getElementById('quick-talk-end');
-  if (e) e.value = row.dataset.end || '';
+  if (e) e.value = toLocalInputFormat(row.dataset.end);
 
   m.style.display = 'flex';
 };
+
+function setBtnBusy(btn, isBusy, busyText) {
+  if (!btn) return;
+  btn.disabled = isBusy;
+  if (isBusy) {
+    if (!btn.dataset.origText) btn.dataset.origText = btn.textContent.trim();
+    btn.textContent = '';
+    const sp = document.createElement('span');
+    sp.className = 'spinner spinner-sm';
+    btn.appendChild(sp);
+    btn.appendChild(document.createTextNode(' ' + busyText));
+  } else {
+    btn.textContent = btn.dataset.origText || 'Submit';
+  }
+}
 
 window.submitScheduleImport = async function() {
   const fileInput = document.getElementById('import-file-input');
   const jsonText = (document.getElementById('import-json-textarea') || {}).value || '';
   const btn = document.getElementById('btn-submit-import');
-  const orig = btn ? btn.innerHTML : '';
 
-  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner spinner-sm"></span> Importing...'; }
+  setBtnBusy(btn, true, 'Importing...');
 
   try {
     let res;
@@ -341,7 +361,7 @@ window.submitScheduleImport = async function() {
   } catch (err) {
     alert(`Import failed: ${err.message}`);
   } finally {
-    if (btn) { btn.disabled = false; btn.innerHTML = orig; }
+    setBtnBusy(btn, false);
   }
 };
 
@@ -366,7 +386,7 @@ window.submitQuickTalk = async function() {
   const startVal = (document.getElementById('quick-talk-start') || {}).value || '';
   const endVal = (document.getElementById('quick-talk-end') || {}).value || '';
   const btn = document.getElementById('btn-submit-quick-talk');
-  const orig = btn ? btn.innerHTML : '';
+  const origText = btn ? btn.textContent : '';
 
   if (!title) {
     if (titleInput) {
@@ -381,7 +401,14 @@ window.submitQuickTalk = async function() {
     return;
   }
 
-  if (btn) { btn.disabled = true; btn.innerHTML = `<span class="spinner spinner-sm"></span> ${editId ? 'Saving' : 'Creating'}...`; }
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '';
+    const sp = document.createElement('span');
+    sp.className = 'spinner spinner-sm';
+    btn.appendChild(sp);
+    btn.appendChild(document.createTextNode(editId ? ' Saving...' : ' Creating...'));
+  }
 
   try {
     const payload = editId ? { title, room } : { event_name: eventName, title, room };
@@ -390,12 +417,8 @@ window.submitQuickTalk = async function() {
       payload.event_id = eventId;
     }
 
-    if (startVal) {
-      payload.start = new Date(startVal).toISOString();
-    }
-    if (endVal) {
-      payload.end = new Date(endVal).toISOString();
-    }
+    payload.start = startVal ? new Date(startVal).toISOString() : null;
+    payload.end = endVal ? new Date(endVal).toISOString() : null;
 
     const url = editId ? `/talks/${editId}` : '/talks/schedule/import';
     const method = editId ? 'PATCH' : 'POST';
@@ -434,7 +457,7 @@ window.submitQuickTalk = async function() {
     }
   } catch (err) {
     alert(`Failed to ${editId ? 'edit' : 'create'} talk: ${err.message}`);
-    if (btn) { btn.disabled = false; btn.innerHTML = orig; }
+    if (btn) { btn.disabled = false; btn.textContent = origText; }
   }
 };
 
@@ -513,8 +536,7 @@ window.submitBulkDelete = async function() {
   }
 
   const btn = document.getElementById('btn-bulk-delete');
-  const orig = btn ? btn.innerHTML : '';
-  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner spinner-sm"></span> Deleting...'; }
+  setBtnBusy(btn, true, 'Deleting...');
 
   try {
     const res = await (window.authFetch || fetch)('/talks/bulk-delete', {
@@ -528,10 +550,12 @@ window.submitBulkDelete = async function() {
       throw new Error(err.detail || `Server returned ${res.status}`);
     }
 
-    location.reload();
+    const data = await res.json();
+    alert(`Successfully deleted ${data.deleted_count} talk(s).`);
+    window.location.reload();
   } catch (err) {
     alert(`Bulk delete failed: ${err.message}`);
-    if (btn) { btn.disabled = false; btn.innerHTML = orig; }
+    setBtnBusy(btn, false);
   }
 };
 

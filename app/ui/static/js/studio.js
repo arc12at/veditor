@@ -999,8 +999,15 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!shell) return;
       document.getElementById('edit-talk-title').value = shell.dataset.talkTitle || '';
       document.getElementById('edit-talk-room').value = shell.dataset.talkRoom || '';
-      document.getElementById('edit-talk-start').value = shell.dataset.talkStart || '';
-      document.getElementById('edit-talk-end').value = shell.dataset.talkEnd || '';
+      const toLocalInputFormat = (isoString) => {
+        if (!isoString) return '';
+        const d = new Date(isoString);
+        if (isNaN(d.getTime())) return '';
+        return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+      };
+      
+      document.getElementById('edit-talk-start').value = toLocalInputFormat(shell.dataset.talkStart);
+      document.getElementById('edit-talk-end').value = toLocalInputFormat(shell.dataset.talkEnd);
       editModal.style.display = 'flex';
     });
 
@@ -1028,14 +1035,18 @@ document.addEventListener('DOMContentLoaded', () => {
           return;
         }
 
-        const orig = submitBtn.innerHTML;
+        const origText = submitBtn.textContent;
         submitBtn.disabled = true;
-        submitBtn.innerHTML = '<span class="spinner spinner-sm"></span> Saving...';
+        submitBtn.textContent = '';
+        const sp = document.createElement('span');
+        sp.className = 'spinner spinner-sm';
+        submitBtn.appendChild(sp);
+        submitBtn.appendChild(document.createTextNode(' Saving...'));
 
         try {
           const payload = { title, room };
-          if (startVal) payload.start = new Date(startVal).toISOString();
-          if (endVal) payload.end = new Date(endVal).toISOString();
+          payload.start = startVal ? new Date(startVal).toISOString() : null;
+          payload.end = endVal ? new Date(endVal).toISOString() : null;
 
           const res = await (window.authFetch || fetch)(`/talks/${currentTalkId}`, {
             method: 'PATCH',
@@ -1051,7 +1062,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (err) {
           alert(`Failed to update talk: ${err.message}`);
           submitBtn.disabled = false;
-          submitBtn.innerHTML = orig;
+          submitBtn.textContent = origText;
         }
       });
     }

@@ -417,8 +417,8 @@ window.submitQuickTalk = async function() {
       payload.event_id = eventId;
     }
 
-    payload.start = startVal ? new Date(startVal).toISOString() : null;
-    payload.end = endVal ? new Date(endVal).toISOString() : null;
+    if (startVal) payload.start = new Date(startVal).toISOString();
+    if (endVal) payload.end = new Date(endVal).toISOString();
 
     const url = editId ? `/talks/${editId}` : '/talks/schedule/import';
     const method = editId ? 'PATCH' : 'POST';

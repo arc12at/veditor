@@ -1045,8 +1045,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         try {
           const payload = { title, room };
-          payload.start = startVal ? new Date(startVal).toISOString() : null;
-          payload.end = endVal ? new Date(endVal).toISOString() : null;
+          if (startVal) payload.start = new Date(startVal).toISOString();
+          if (endVal) payload.end = new Date(endVal).toISOString();
 
           const res = await (window.authFetch || fetch)(`/talks/${currentTalkId}`, {
             method: 'PATCH',

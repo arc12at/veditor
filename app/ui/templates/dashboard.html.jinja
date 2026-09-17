@@ -99,7 +99,7 @@
   </div>
 
   <!-- Bulk Actions Bar -->
-  {% if not (user and user.is_sso) %}
+  {% if user and user.role in ['organizer', 'admin'] and not user.is_sso %}
   <div id="bulk-actions-bar">
     <div class="bulk-actions-info">
       <span id="selected-count-text">0 talks selected</span>
@@ -128,7 +128,7 @@
           Events
         </a>
         {% endif %}
-        {% if not (user and user.is_sso) %}
+        {% if user and user.role in ['organizer', 'admin'] and not user.is_sso %}
         <button class="btn btn-ghost btn-sm" id="btn-open-import">
           <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
           Import Schedule
@@ -149,7 +149,7 @@
     <table>
       <thead>
         <tr>
-          {% if not (user and user.is_sso) %}
+          {% if user and user.role in ['organizer', 'admin'] and not user.is_sso %}
           <th class="col-checkbox">
             <input type="checkbox" id="select-all-talks" title="Select all talks">
           </th>
@@ -165,7 +165,7 @@
       <tbody>
         {% for talk in talks %}
         <tr data-talk-id="{{ talk.id }}" data-status="{{ talk.status }}" data-title="{{ talk.title | e }}" data-room="{{ talk.room or '' | e }}" data-start="{{ talk.start.isoformat() if talk.start else '' }}" data-end="{{ talk.end.isoformat() if talk.end else '' }}">
-          {% if not (user and user.is_sso) %}
+          {% if user and user.role in ['organizer', 'admin'] and not user.is_sso %}
           <td class="col-checkbox">
             <input type="checkbox" class="talk-checkbox" value="{{ talk.id }}">
           </td>

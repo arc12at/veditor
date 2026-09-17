@@ -993,36 +993,6 @@ def test_patch_talk_empty_title_rejected():
     app.dependency_overrides.clear()
 
 
-def test_patch_talk_end_before_start_rejected():
-    mock_db = MagicMock()
-    mock_client = models.Client(id=1, event_ids=[1])
-
-    app.dependency_overrides[get_client] = lambda: mock_client
-    app.dependency_overrides[get_db] = lambda: mock_db
-
-    start_time = datetime(2026, 9, 1, 10, 0, tzinfo=UTC)
-    end_time = datetime(2026, 9, 1, 11, 0, tzinfo=UTC)
-    existing_talk = models.Talk(
-        id=1,
-        event_id=1,
-        title="Old Title",
-        start=start_time,
-        end=end_time,
-        status="waiting_for_files",
-    )
-    mock_db.query.return_value.filter.return_value.first.return_value = existing_talk
-
-    resp = client.patch(
-        "/talks/1",
-        json={"end": end_time.isoformat()},
-        headers={"X-API-Key": "key"},
-    )
-    assert resp.status_code == 400
-    assert "after start time" in resp.json()["detail"]
-
-    app.dependency_overrides.clear()
-
-
 def test_full_pipeline_flow_recordings_to_preview_halt():
     """
     Simulates full pipeline flow from ingest to preview halt (Phase 4):

@@ -295,7 +295,7 @@ class ApprovedCut(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     talk_id: Mapped[int] = mapped_column(
-        ForeignKey("talks.id", ondelete="CASCADE"), nullable=False
+        ForeignKey("talks.id", ondelete="CASCADE"), nullable=False, index=True
     )
     cut_start: Mapped[float] = mapped_column(Float, nullable=False)
     cut_end: Mapped[float] = mapped_column(Float, nullable=False)

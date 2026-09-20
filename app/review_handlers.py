@@ -3,6 +3,7 @@
 import logging
 from collections.abc import Callable
 
+from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app import models, schemas
@@ -30,7 +31,10 @@ def _record_review_and_advance(
 
         if payload.decision == schemas.ReviewDecision.approve:
             if talk.cut_start is None or talk.cut_end is None:
-                raise ValueError("Cannot approve a talk without cut bounds.")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Cannot approve a talk without cut bounds.",
+                )
             db.add(
                 models.ApprovedCut(
                     talk_id=talk.id,

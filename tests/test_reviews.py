@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 from unittest.mock import call as mock_call
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from app import models, schemas
@@ -1001,17 +1002,8 @@ def test_review_human_admin_success(mock_db, preview_talk, fake_storage):
     assert data["review"]["user_id"] == 1
 
 
-def test_review_multiple_approvals_create_multiple_rows(
-    mock_db, preview_talk, fake_storage
-):
+def test_review_multiple_approvals_create_multiple_rows(mock_db, preview_talk):
     """A talk that goes needs_work and is approved on a later pass has one ApprovedCut row per approval, not one overwritten row."""
-    mock_client = models.Client(id=1, event_ids=[1])
-    mock_db.query.return_value.filter.return_value.first.return_value = preview_talk
-
-    app.dependency_overrides[get_client] = lambda: mock_client
-    app.dependency_overrides[get_db] = lambda: mock_db
-    app.dependency_overrides[get_storage_backend] = lambda: fake_storage
-
     # First approve
     req_approve1 = schemas.ReviewRequest(decision=schemas.ReviewDecision.approve)
     handle_approve(preview_talk, req_approve1, mock_db)
@@ -1040,3 +1032,55 @@ def test_review_multiple_approvals_create_multiple_rows(
 
     assert approved_cuts[1].cut_start == 12.0
     assert approved_cuts[1].cut_end == 55.0
+
+
+@pytest.mark.parametrize(
+    ("cut_start", "cut_end"),
+    [
+        (None, 60.0),
+        (10.0, None),
+        (None, None),
+    ],
+)
+def test_review_approve_missing_bounds_returns_400(
+    mock_db, preview_talk, cut_start, cut_end
+):
+    """POST /talks/{id}/review returns 400 when approving a talk without cut bounds."""
+    preview_talk.cut_start = cut_start
+    preview_talk.cut_end = cut_end
+    mock_client = models.Client(id=1, event_ids=[1])
+    mock_db.query.return_value.filter.return_value.first.return_value = preview_talk
+
+    app.dependency_overrides[get_client] = lambda: mock_client
+    app.dependency_overrides[get_db] = lambda: mock_db
+
+    response = client.post(
+        "/talks/1/review",
+        json={"decision": "approve"},
+        headers={"X-API-Key": "valid_key"},
+    )
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Cannot approve a talk without cut bounds."
+    mock_db.commit.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("cut_start", "cut_end"),
+    [
+        (None, 60.0),
+        (10.0, None),
+        (None, None),
+    ],
+)
+def test_handle_approve_missing_bounds_raises_http_exception(
+    mock_db, preview_talk, cut_start, cut_end
+):
+    """handle_approve raises HTTPException(400) when talk lacks cut bounds."""
+    preview_talk.cut_start = cut_start
+    preview_talk.cut_end = cut_end
+    payload = schemas.ReviewRequest(decision=schemas.ReviewDecision.approve)
+
+    with pytest.raises(HTTPException) as exc_info:
+        handle_approve(preview_talk, payload, mock_db)
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == "Cannot approve a talk without cut bounds."

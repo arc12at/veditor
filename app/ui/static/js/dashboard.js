@@ -261,7 +261,10 @@ window.openQuickTalkModal = function() {
     const btn = document.getElementById('btn-submit-quick-talk');
     const eventSel = document.getElementById('quick-event-name');
     if (title) title.textContent = 'Register New Talk';
-    if (btn) btn.textContent = 'Create Talk';
+    if (btn) {
+      btn.textContent = 'Create Talk';
+      btn.dataset.origText = 'Create Talk';
+    }
     if (eventSel) eventSel.parentElement.style.display = '';
     ['title', 'room', 'start', 'end'].forEach(k => {
       const el = document.getElementById(`quick-talk-${k}`);
@@ -284,7 +287,10 @@ window.openEditTalkModal = function(row) {
   const btn = document.getElementById('btn-submit-quick-talk');
   const eventSel = document.getElementById('quick-event-name');
   if (title) title.textContent = 'Edit Talk';
-  if (btn) btn.textContent = 'Save Changes';
+  if (btn) {
+    btn.textContent = 'Save Changes';
+    btn.dataset.origText = 'Save Changes';
+  }
   if (eventSel) eventSel.parentElement.style.display = 'none';
 
   const t = document.getElementById('quick-talk-title');
@@ -382,11 +388,11 @@ window.submitQuickTalk = async function() {
   }
   const titleInput = document.getElementById('quick-talk-title');
   const title = (titleInput ? titleInput.value : '').trim();
-  const room = (document.getElementById('quick-talk-room') || {}).value || '';
+  const rawRoom = (document.getElementById('quick-talk-room') || {}).value || '';
+  const room = rawRoom.trim() || null;
   const startVal = (document.getElementById('quick-talk-start') || {}).value || '';
   const endVal = (document.getElementById('quick-talk-end') || {}).value || '';
   const btn = document.getElementById('btn-submit-quick-talk');
-  const origText = btn ? btn.textContent : '';
 
   if (!title) {
     if (titleInput) {
@@ -401,14 +407,7 @@ window.submitQuickTalk = async function() {
     return;
   }
 
-  if (btn) {
-    btn.disabled = true;
-    btn.textContent = '';
-    const sp = document.createElement('span');
-    sp.className = 'spinner spinner-sm';
-    btn.appendChild(sp);
-    btn.appendChild(document.createTextNode(editId ? ' Saving...' : ' Creating...'));
-  }
+  setBtnBusy(btn, true, editId ? 'Saving...' : 'Creating...');
 
   try {
     const payload = editId ? { title, room } : { event_name: eventName, title, room };
@@ -417,8 +416,13 @@ window.submitQuickTalk = async function() {
       payload.event_id = eventId;
     }
 
-    if (startVal) payload.start = new Date(startVal).toISOString();
-    if (endVal) payload.end = new Date(endVal).toISOString();
+    if (editId) {
+      payload.start = startVal ? new Date(startVal).toISOString() : null;
+      payload.end = endVal ? new Date(endVal).toISOString() : null;
+    } else {
+      if (startVal) payload.start = new Date(startVal).toISOString();
+      if (endVal) payload.end = new Date(endVal).toISOString();
+    }
 
     const url = editId ? `/talks/${editId}` : '/talks/schedule/import';
     const method = editId ? 'PATCH' : 'POST';
@@ -457,7 +461,7 @@ window.submitQuickTalk = async function() {
     }
   } catch (err) {
     alert(`Failed to ${editId ? 'edit' : 'create'} talk: ${err.message}`);
-    if (btn) { btn.disabled = false; btn.textContent = origText; }
+    setBtnBusy(btn, false);
   }
 };
 

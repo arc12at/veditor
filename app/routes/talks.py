@@ -799,7 +799,19 @@ def update_talk(
             )
         talk.title = title
     if "room" in update_data:
-        talk.room = update_data["room"]
+        raw_room = update_data["room"]
+        talk.room = raw_room.strip() if (raw_room and raw_room.strip()) else None
+
+    if "start" in update_data and update_data["start"] is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Talk start time cannot be empty",
+        )
+    if "end" in update_data and update_data["end"] is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Talk end time cannot be empty",
+        )
 
     new_start = update_data.get("start", talk.start)
     new_end = update_data.get("end", talk.end)

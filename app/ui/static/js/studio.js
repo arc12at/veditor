@@ -1022,7 +1022,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (submitBtn) {
       submitBtn.addEventListener('click', async () => {
         const title = document.getElementById('edit-talk-title').value.trim();
-        const room = document.getElementById('edit-talk-room').value;
+        const rawRoom = (document.getElementById('edit-talk-room') || {}).value || '';
+        const room = rawRoom.trim() || null;
         const startVal = document.getElementById('edit-talk-start').value;
         const endVal = document.getElementById('edit-talk-end').value;
 
@@ -1044,13 +1045,17 @@ document.addEventListener('DOMContentLoaded', () => {
         submitBtn.appendChild(document.createTextNode(' Saving...'));
 
         try {
-          const payload = { title, room };
-          if (startVal) payload.start = new Date(startVal).toISOString();
-          if (endVal) payload.end = new Date(endVal).toISOString();
+          const payload = {
+            title,
+            room,
+            start: startVal ? new Date(startVal).toISOString() : null,
+            end: endVal ? new Date(endVal).toISOString() : null,
+          };
 
           const res = await (window.authFetch || fetch)(`/talks/${currentTalkId}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
             body: JSON.stringify(payload),
           });
 

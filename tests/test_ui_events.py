@@ -815,3 +815,53 @@ def test_studio_edit_button_hidden_for_sso(client: TestClient, db_session):
     res = client.get(f"/studio/talks/{talk.id}")
     assert res.status_code == 200
     assert "btn-edit-talk-studio" not in res.text
+
+
+def test_dashboard_room_attribute_escaped(client: TestClient, db_session):
+    org = create_user(db_session, "org_xss@test.com", "organizer")
+    ev = models.Event(name="XSS Conf", created_by_user_id=org.id)
+    db_session.add(ev)
+    db_session.commit()
+    db_session.refresh(ev)
+    talk = models.Talk(
+        event_id=ev.id,
+        title='Title "With Quotes"',
+        room='Room "Breakout" <script>alert(1)</script>',
+        start=datetime.now(UTC),
+        end=datetime.now(UTC),
+    )
+    db_session.add(talk)
+    db_session.commit()
+
+    authenticate_client(client, org)
+    res = client.get("/studio")
+    assert res.status_code == 200
+    assert (
+        'data-room="Room &#34;Breakout&#34; &lt;script&gt;alert(1)&lt;/script&gt;"'
+        in res.text
+    )
+
+
+def test_studio_room_attribute_escaped(client: TestClient, db_session):
+    org = create_user(db_session, "org_studio_xss@test.com", "organizer")
+    ev = models.Event(name="Studio XSS Conf", created_by_user_id=org.id)
+    db_session.add(ev)
+    db_session.commit()
+    db_session.refresh(ev)
+    talk = models.Talk(
+        event_id=ev.id,
+        title='Title "With Quotes"',
+        room='Room "Breakout" <script>alert(1)</script>',
+        start=datetime.now(UTC),
+        end=datetime.now(UTC),
+    )
+    db_session.add(talk)
+    db_session.commit()
+
+    authenticate_client(client, org)
+    res = client.get(f"/studio/talks/{talk.id}")
+    assert res.status_code == 200
+    assert (
+        'data-talk-room="Room &#34;Breakout&#34; &lt;script&gt;alert(1)&lt;/script&gt;"'
+        in res.text
+    )

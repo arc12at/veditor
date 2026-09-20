@@ -1,11 +1,32 @@
+import uuid
 from typing import Annotated
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
-from fastapi import HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi.testclient import TestClient
 
-from app.auth import get_client, hash_api_key, lock_active_admins, verify_event_access
-from app.models import Client, User
+from app.auth import (
+    CurrentUser,
+    check_event_access,
+    get_client,
+    get_current_user,
+    hash_api_key,
+    lock_active_admins,
+    require_admin,
+    require_event_access,
+    require_role,
+    require_talk_access,
+    verify_event_access,
+)
+from app.db import SessionLocal, get_db
+from app.main import app
+from app.models import Client, Event, Talk, User
+from app.security import (
+    create_access_token,
+    create_session_token,
+    hash_password,
+)
 
 
 def test_hash_api_key():
@@ -64,22 +85,6 @@ def test_verify_event_access_out_of_scope():
 # ---------------------------------------------------------------------------
 
 
-from fastapi import Depends, FastAPI
-from fastapi.testclient import TestClient
-
-from app.auth import (
-    CurrentUser,
-    check_event_access,
-    get_current_user,
-    require_admin,
-    require_event_access,
-    require_role,
-    require_talk_access,
-)
-from app.models import Event, Talk
-from app.security import create_access_token, create_session_token
-
-
 def test_current_user_model_attributes():
     user = CurrentUser(
         user_id=1,
@@ -119,6 +124,22 @@ def test_get_current_user_api_key_valid():
     mock_db.query.return_value.filter.return_value.first.return_value = mock_client
 
     user = get_current_user(api_key="secret-key", db=mock_db)
+    assert user.source == "api_key"
+    assert user.role == "admin"
+    assert user.user_id is None
+    assert user.email is None
+    assert user.event_ids == [42]
+    assert user.is_machine
+
+
+def test_get_current_user_cookie_api_key_valid():
+    mock_client = Client(
+        id=1, hashed_key=hash_api_key("secret-cookie-key"), event_ids=[42]
+    )
+    mock_db = MagicMock()
+    mock_db.query.return_value.filter.return_value.first.return_value = mock_client
+
+    user = get_current_user(cookie_api_key="secret-cookie-key", db=mock_db)
     assert user.source == "api_key"
     assert user.role == "admin"
     assert user.user_id is None
@@ -250,7 +271,7 @@ def test_get_current_user_precedence_api_key_over_cookie():
 
 
 def test_get_current_user_fail_fast_on_invalid_api_key():
-    # If API key is provided but invalid, fails immediately with 401 instead of falling back.
+    # If explicit API key is provided but invalid, fails immediately with 401 instead of falling back.
     mock_db = MagicMock()
     mock_db.query.return_value.filter.return_value.first.return_value = None
 
@@ -259,6 +280,41 @@ def test_get_current_user_fail_fast_on_invalid_api_key():
         get_current_user(api_key="bad-key", cookie_token=token, db=mock_db)
     assert excinfo.value.status_code == status.HTTP_401_UNAUTHORIZED
     assert excinfo.value.detail == "Invalid API Key"
+
+
+def test_get_current_user_precedence_session_over_cookie_api_key():
+    # Valid session cookie takes precedence over stale or invalid cookie_api_key.
+    mock_user = User(id=2, email="u@example.com", role="user", is_active=True)
+    mock_db = MagicMock()
+    mock_db.query.return_value.filter.return_value.first.return_value = mock_user
+
+    token = create_session_token(user_id=2, role="user")
+    user = get_current_user(
+        cookie_token=token, cookie_api_key="stale-or-invalid-key", db=mock_db
+    )
+    assert user.source == "cookie"
+    assert user.user_id == 2
+
+
+def test_get_current_user_ignores_stale_cookie_api_key_for_bearer_token():
+    token = create_access_token(user_id=2, email="u@example.com", role="user")
+    mock_user = User(id=2, email="u@example.com", role="user", is_active=True)
+    mock_db = MagicMock()
+    mock_db.query.return_value.filter.return_value.first.side_effect = [
+        None,
+        mock_user,
+    ]
+    mock_creds = MagicMock()
+    mock_creds.credentials = token
+
+    user = get_current_user(
+        cookie_api_key="stale-or-invalid-key",
+        bearer_creds=mock_creds,
+        db=mock_db,
+    )
+
+    assert user.source == "jwt"
+    assert user.user_id == 2
 
 
 # ---------------------------------------------------------------------------
@@ -433,9 +489,6 @@ def test_fastapi_route_auth_integration():
     # Override get_db to return a mock DB session
     mock_db = MagicMock()
     mock_db.query.return_value.filter.return_value.first.return_value = mock_event
-
-    from app.db import get_db
-
     test_app.dependency_overrides[get_db] = lambda: mock_db
 
     client = TestClient(test_app)
@@ -525,9 +578,6 @@ def test_require_event_access_query_param_bypass_prevented():
     mock_db.query.return_value.filter.return_value.first.side_effect = [
         mock_event_2,
     ]
-
-    from app.db import get_db
-
     test_app.dependency_overrides[get_db] = lambda: mock_db
     # Caller is authorized for event 1, but requesting /events/2?event_id=1
     client_user = CurrentUser(role="admin", source="api_key", event_ids=[1])
@@ -601,9 +651,6 @@ def test_require_talk_access_success_and_unauthorized():
     mock_talk = Talk(id=10, event_id=1, status="done")
     mock_db = MagicMock()
     mock_db.query.return_value.filter.return_value.first.return_value = mock_talk
-
-    from app.db import get_db
-
     test_app.dependency_overrides[get_db] = lambda: mock_db
 
     # Authorized user (admin)
@@ -621,3 +668,171 @@ def test_require_talk_access_success_and_unauthorized():
     )
     resp = client.get("/talks/10")
     assert resp.status_code == 403
+
+
+def test_role_hierarchy_levels():
+    """Verify exact role hierarchy: user(0) < speaker(1) < organizer(2) < admin(3)."""
+    from app.auth import ROLE_HIERARCHY
+
+    assert ROLE_HIERARCHY["user"] == 0
+    assert ROLE_HIERARCHY["speaker"] == 1
+    assert ROLE_HIERARCHY["organizer"] == 2
+    assert ROLE_HIERARCHY["admin"] == 3
+    assert len(ROLE_HIERARCHY) == 4
+
+
+def test_login_routes_next_redirect_and_open_redirect_protection():
+    db = SessionLocal()
+    app.dependency_overrides[get_db] = lambda: db
+    user = None
+
+    try:
+        user = User(
+            email=f"next_test_{uuid.uuid4().hex[:6]}@example.com",
+            hashed_password=hash_password("Pass1234!"),
+            role="organizer",
+            is_active=True,
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+
+        client = TestClient(app)
+
+        # 1. Login page passes next parameter to template context
+        resp_page = client.get("/login?next=/studio/events")
+        assert resp_page.status_code == 200
+        assert (
+            '<input type="hidden" name="next" value="/studio/events">' in resp_page.text
+        )
+
+        # 2. Login submit with next redirects to the specified route (HTTP 303)
+        resp_next = client.post(
+            "/login",
+            data={
+                "email": user.email,
+                "password": "Pass1234!",
+                "next": "/studio/events",
+            },
+            follow_redirects=False,
+        )
+        assert resp_next.status_code == 303
+        assert resp_next.headers["location"] == "/studio/events"
+
+        # 3. Missing next parameter defaults to /studio
+        resp_default = client.post(
+            "/login",
+            data={"email": user.email, "password": "Pass1234!"},
+            follow_redirects=False,
+        )
+        assert resp_default.status_code == 303
+        assert resp_default.headers["location"] == "/studio"
+
+        # 4. Open-redirect prevention: external URL is rejected and safely defaults to /studio
+        resp_malicious_ext = client.post(
+            "/login",
+            data={
+                "email": user.email,
+                "password": "Pass1234!",
+                "next": "https://attacker.com",
+            },
+            follow_redirects=False,
+        )
+        assert resp_malicious_ext.status_code == 303
+        assert resp_malicious_ext.headers["location"] == "/studio"
+
+        # 5. Open-redirect prevention: protocol-relative URL is rejected and safely defaults to /studio
+        resp_malicious_proto = client.post(
+            "/login",
+            data={
+                "email": user.email,
+                "password": "Pass1234!",
+                "next": "//attacker.com",
+            },
+            follow_redirects=False,
+        )
+        assert resp_malicious_proto.status_code == 303
+        assert resp_malicious_proto.headers["location"] == "/studio"
+
+        # 6. Auth loop prevention: case-insensitive auth paths (/Login, /LOGOUT, /Signup) safely default to /studio
+        for auth_target in ("/Login", "/LOGOUT", "/Signup", "/login/", "/Logout/"):
+            resp_loop = client.post(
+                "/login",
+                data={
+                    "email": user.email,
+                    "password": "Pass1234!",
+                    "next": auth_target,
+                },
+                follow_redirects=False,
+            )
+            assert resp_loop.status_code == 303
+            assert resp_loop.headers["location"] == "/studio"
+
+        # 7. Failed login re-renders page preserving next hidden input
+        resp_fail = client.post(
+            "/login",
+            data={
+                "email": user.email,
+                "password": "WrongPassword!",
+                "next": "/studio/talks/10",
+            },
+            follow_redirects=False,
+        )
+        assert resp_fail.status_code == 400
+        assert (
+            '<input type="hidden" name="next" value="/studio/talks/10">'
+            in resp_fail.text
+        )
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        try:
+            db.rollback()
+            if user is not None and getattr(user, "id", None):
+                db.query(User).filter(User.id == user.id).delete()
+                db.commit()
+        finally:
+            db.close()
+
+
+def test_get_client_throttles_last_used_at_updates():
+    from datetime import UTC, datetime, timedelta
+    from unittest.mock import MagicMock
+
+    from app.auth import get_client
+    from app.models import Client
+
+    mock_db = MagicMock()
+    now = datetime.now(UTC)
+    client_recent = Client(
+        id=1,
+        name="Test",
+        hashed_key="some_hash",
+        last_used_at=now - timedelta(seconds=60),
+    )
+    mock_db.query.return_value.filter.return_value.first.return_value = client_recent
+
+    with patch("app.auth.hash_api_key", return_value="some_hash"):
+        resolved = get_client(api_key="valid-key", db=mock_db)
+        assert resolved == client_recent
+        assert not mock_db.commit.called
+
+    client_stale = Client(
+        id=2,
+        name="Test2",
+        hashed_key="stale_hash",
+        last_used_at=now - timedelta(seconds=350),
+    )
+    mock_db.query.return_value.filter.return_value.first.return_value = client_stale
+
+    with (
+        patch("app.auth.hash_api_key", return_value="stale_hash"),
+        patch("app.auth.SessionLocal") as mock_session_local,
+    ):
+        mock_isolated_session = MagicMock()
+        mock_session_local.return_value.__enter__.return_value = mock_isolated_session
+        resolved2 = get_client(api_key="valid-key", db=mock_db)
+        assert resolved2 == client_stale
+        # Request session is never prematurely committed
+        assert not mock_db.commit.called
+        # Isolated session is committed out-of-band
+        assert mock_isolated_session.commit.called

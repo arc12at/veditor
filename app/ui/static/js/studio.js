@@ -1137,8 +1137,16 @@ document.addEventListener('DOMContentLoaded', () => {
         const startVal = document.getElementById('edit-talk-start').value;
         const endVal = document.getElementById('edit-talk-end').value;
 
+        const shell = getStudioShell();
+        const origStart = shell ? shell.dataset.talkStart : '';
+        const origEnd = shell ? shell.dataset.talkEnd : '';
+
         if (!title) {
           alert('Talk title is required.');
+          return;
+        }
+        if ((origStart && !startVal) || (origEnd && !endVal)) {
+          alert('Cannot clear scheduled talk times.');
           return;
         }
         if (startVal && endVal && new Date(endVal) <= new Date(startVal)) {
@@ -1155,12 +1163,9 @@ document.addEventListener('DOMContentLoaded', () => {
         submitBtn.appendChild(document.createTextNode(' Saving...'));
 
         try {
-          const payload = {
-            title,
-            room,
-            start: startVal ? new Date(startVal).toISOString() : null,
-            end: endVal ? new Date(endVal).toISOString() : null,
-          };
+          const payload = { title, room };
+          if (startVal) payload.start = new Date(startVal).toISOString();
+          if (endVal) payload.end = new Date(endVal).toISOString();
 
           const res = await (window.authFetch || fetch)(`/talks/${currentTalkId}`, {
             method: 'PATCH',

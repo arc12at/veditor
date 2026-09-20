@@ -867,6 +867,14 @@ def abort_talk(
     return schemas.TalkRead.model_validate(talk)
 
 
+def _normalize_dt(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
+
+
 @router.patch("/{talk_id}", response_model=schemas.TalkRead)
 def update_talk(
     talk_id: int,
@@ -915,8 +923,8 @@ def update_talk(
             detail="Talk end time cannot be empty",
         )
 
-    new_start = update_data.get("start", talk.start)
-    new_end = update_data.get("end", talk.end)
+    new_start = _normalize_dt(update_data.get("start", talk.start))
+    new_end = _normalize_dt(update_data.get("end", talk.end))
     if new_start and new_end and new_end <= new_start:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

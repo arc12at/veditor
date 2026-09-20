@@ -257,6 +257,8 @@ window.openQuickTalkModal = function() {
   const m = document.getElementById('modal-quick-talk');
   if (m) {
     m.dataset.editId = '';
+    m.dataset.origStart = '';
+    m.dataset.origEnd = '';
     const title = m.querySelector('.dashboard-modal-title');
     const btn = document.getElementById('btn-submit-quick-talk');
     const eventSel = document.getElementById('quick-event-name');
@@ -283,6 +285,8 @@ window.openEditTalkModal = function(row) {
   const m = document.getElementById('modal-quick-talk');
   if (!m) return;
   m.dataset.editId = row.dataset.talkId;
+  m.dataset.origStart = row.dataset.start || '';
+  m.dataset.origEnd = row.dataset.end || '';
   const title = m.querySelector('.dashboard-modal-title');
   const btn = document.getElementById('btn-submit-quick-talk');
   const eventSel = document.getElementById('quick-event-name');
@@ -402,6 +406,15 @@ window.submitQuickTalk = async function() {
     return;
   }
 
+  if (editId) {
+    const origStart = m ? m.dataset.origStart : '';
+    const origEnd = m ? m.dataset.origEnd : '';
+    if ((origStart && !startVal) || (origEnd && !endVal)) {
+      alert('Cannot clear scheduled talk times.');
+      return;
+    }
+  }
+
   if (startVal && endVal && new Date(endVal) <= new Date(startVal)) {
     alert('End time must be after start time.');
     return;
@@ -416,13 +429,8 @@ window.submitQuickTalk = async function() {
       payload.event_id = eventId;
     }
 
-    if (editId) {
-      payload.start = startVal ? new Date(startVal).toISOString() : null;
-      payload.end = endVal ? new Date(endVal).toISOString() : null;
-    } else {
-      if (startVal) payload.start = new Date(startVal).toISOString();
-      if (endVal) payload.end = new Date(endVal).toISOString();
-    }
+    if (startVal) payload.start = new Date(startVal).toISOString();
+    if (endVal) payload.end = new Date(endVal).toISOString();
 
     const url = editId ? `/talks/${editId}` : '/talks/schedule/import';
     const method = editId ? 'PATCH' : 'POST';

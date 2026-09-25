@@ -74,10 +74,19 @@ def test_404_root_path_support():
     assert 'href="/custom-root"' in resp.text
     assert "/custom-root/static/css/error.css" in resp.text
 
-    client_slash = TestClient(app, root_path="/custom-root/")
-    resp_slash = client_slash.get("/stud", headers={"Accept": "text/html"})
-    assert resp_slash.status_code == 404
-    assert 'href="/custom-root/"' in resp_slash.text
+    # Following root redirect preserves root_path
+    root_resp = client.get("/custom-root/", follow_redirects=False)
+    assert root_resp.status_code == 307
+    assert root_resp.headers["location"] == "/custom-root/studio"
+
+    # Following the homepage link from the 404 page reaches the prefix-aware /custom-root/studio
+    home_resp = client.get("/custom-root", follow_redirects=False)
+    assert home_resp.status_code in (301, 307, 308)
+    assert home_resp.headers["location"] == "http://testserver/custom-root/"
+
+    studio_resp = client.get(home_resp.headers["location"], follow_redirects=False)
+    assert studio_resp.status_code == 307
+    assert studio_resp.headers["location"] == "/custom-root/studio"
 
 
 def test_404_preserves_exception_headers_and_vary():

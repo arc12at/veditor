@@ -118,8 +118,9 @@ app.include_router(studio.router)
 
 
 @app.get("/", include_in_schema=False)
-def root():
-    return RedirectResponse(url="/studio")
+def root(request: Request):
+    root_path = request.scope.get("root_path", "").rstrip("/")
+    return RedirectResponse(url=f"{root_path}/studio")
 
 
 @app.get("/favicon.ico", include_in_schema=False)

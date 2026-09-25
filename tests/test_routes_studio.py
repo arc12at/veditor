@@ -606,3 +606,45 @@ def test_404_content_negotiation_quality_values(client: TestClient):
     )
     assert resp3.status_code == 404
     assert "text/html" in resp3.headers.get("content-type", "")
+
+    # application/* with higher quality than text/html selects JSON
+    resp4 = client.get(
+        "/stud", headers={"Accept": "text/html;q=0.5, application/*;q=1"}
+    )
+    assert resp4.status_code == 404
+    assert "application/json" in resp4.headers.get("content-type", "")
+
+
+def test_404_preserves_exception_headers_and_vary():
+    from fastapi import HTTPException
+
+    # Create a test app route that raises 404 with custom headers
+    @app.get("/test-404-headers")
+    def route_404_with_headers():
+        raise HTTPException(
+            status_code=404,
+            detail="Item missing",
+            headers={"Cache-Control": "no-store", "Vary": "Accept-Encoding"},
+        )
+
+    test_client = TestClient(app)
+
+    # Browser request: should get HTML, Cache-Control: no-store, and Vary: Accept-Encoding, Accept
+    resp_html = test_client.get("/test-404-headers", headers={"Accept": "text/html"})
+    assert resp_html.status_code == 404
+    assert "text/html" in resp_html.headers.get("content-type", "")
+    assert resp_html.headers.get("cache-control") == "no-store"
+    vary_html = [v.strip() for v in resp_html.headers.get("vary", "").split(",")]
+    assert "Accept-Encoding" in vary_html
+    assert "Accept" in vary_html
+
+    # JSON request: should get JSON, Cache-Control: no-store, and Vary: Accept-Encoding, Accept
+    resp_json = test_client.get(
+        "/test-404-headers", headers={"Accept": "application/json"}
+    )
+    assert resp_json.status_code == 404
+    assert "application/json" in resp_json.headers.get("content-type", "")
+    assert resp_json.headers.get("cache-control") == "no-store"
+    vary_json = [v.strip() for v in resp_json.headers.get("vary", "").split(",")]
+    assert "Accept-Encoding" in vary_json
+    assert "Accept" in vary_json

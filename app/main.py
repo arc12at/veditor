@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -11,11 +12,33 @@ from app.ui.templating import templates
 app = FastAPI(title="VEditor API")
 
 
+def _get_effective_q(
+    accept_items: list[tuple[str, float]], mime: str
+) -> tuple[int, float]:
+    target_type, _ = mime.split("/")
+    best_spec = -1
+    best_q = 0.0
+    for pattern, q in accept_items:
+        if pattern == mime:
+            spec = 2
+        elif pattern == f"{target_type}/*":
+            spec = 1
+        elif pattern == "*/*":
+            spec = 0
+        else:
+            continue
+        if spec > best_spec:
+            best_spec = spec
+            best_q = q
+        elif spec == best_spec:
+            best_q = max(best_q, q)
+    return best_spec, best_q
+
+
 def _prefers_html(accept: str | None) -> bool:
     if not accept:
         return False
-    html_q = 0.0
-    json_q = 0.0
+    items: list[tuple[str, float]] = []
     for item in accept.split(","):
         parts = [p.strip() for p in item.split(";")]
         if not parts or not parts[0]:
@@ -29,33 +52,53 @@ def _prefers_html(accept: str | None) -> bool:
                 except ValueError:
                     q = 0.0
                 break
-        if mime in ("text/html", "application/xhtml+xml"):
-            html_q = max(html_q, q)
-        elif mime == "application/json":
-            json_q = max(json_q, q)
-    return html_q > 0.0 and html_q >= json_q
+        items.append((mime, max(0.0, min(1.0, q))))
+
+    html_spec, html_q = _get_effective_q(items, "text/html")
+    xhtml_spec, xhtml_q = _get_effective_q(items, "application/xhtml+xml")
+    if (xhtml_q, xhtml_spec) > (html_q, html_spec):
+        html_spec, html_q = xhtml_spec, xhtml_q
+
+    json_spec, json_q = _get_effective_q(items, "application/json")
+
+    if html_q <= 0.0:
+        return False
+    if html_q > json_q:
+        return True
+    if html_q == json_q:
+        return html_spec > json_spec
+    return False
+
+
+def _add_vary_accept(headers: dict[str, str] | Any) -> None:
+    vary_key = next((k for k in headers if k.lower() == "vary"), None)
+    if not vary_key:
+        headers["Vary"] = "Accept"
+        return
+    vary = headers[vary_key]
+    fields = [f.strip().lower() for f in vary.split(",")]
+    if "accept" not in fields:
+        headers[vary_key] = f"{vary}, Accept"
 
 
 @app.exception_handler(404)
 async def not_found_handler(request: Request, exc: Exception) -> Response:
+    exc_headers = dict(getattr(exc, "headers", None) or {})
+
     if _prefers_html(request.headers.get("accept")):
         response = templates.TemplateResponse(
             request, "404.html.jinja", {}, status_code=404
         )
-        response.headers["Vary"] = "Accept"
+        for k, v in exc_headers.items():
+            response.headers[k] = v
+        _add_vary_accept(response.headers)
         return response
 
-    headers = dict(getattr(exc, "headers", None) or {})
-    vary = headers.get("Vary")
-    headers["Vary"] = (
-        f"{vary}, Accept"
-        if vary and "accept" not in vary.lower()
-        else (vary or "Accept")
-    )
+    _add_vary_accept(exc_headers)
     return JSONResponse(
         {"detail": getattr(exc, "detail", "Not Found")},
         status_code=404,
-        headers=headers,
+        headers=exc_headers,
     )
 
 

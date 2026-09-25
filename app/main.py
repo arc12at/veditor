@@ -11,16 +11,51 @@ from app.ui.templating import templates
 app = FastAPI(title="VEditor API")
 
 
+def _prefers_html(accept: str | None) -> bool:
+    if not accept:
+        return False
+    html_q = 0.0
+    json_q = 0.0
+    for item in accept.split(","):
+        parts = [p.strip() for p in item.split(";")]
+        if not parts or not parts[0]:
+            continue
+        mime = parts[0].lower()
+        q = 1.0
+        for param in parts[1:]:
+            if param.lower().startswith("q="):
+                try:
+                    q = float(param[2:])
+                except ValueError:
+                    q = 0.0
+                break
+        if mime in ("text/html", "application/xhtml+xml"):
+            html_q = max(html_q, q)
+        elif mime == "application/json":
+            json_q = max(json_q, q)
+    return html_q > 0.0 and html_q >= json_q
+
+
 @app.exception_handler(404)
 async def not_found_handler(request: Request, exc: Exception) -> Response:
-    if "text/html" in request.headers.get("accept", ""):
-        return templates.TemplateResponse(
+    if _prefers_html(request.headers.get("accept")):
+        response = templates.TemplateResponse(
             request, "404.html.jinja", {}, status_code=404
         )
+        response.headers["Vary"] = "Accept"
+        return response
+
+    headers = dict(getattr(exc, "headers", None) or {})
+    vary = headers.get("Vary")
+    headers["Vary"] = (
+        f"{vary}, Accept"
+        if vary and "accept" not in vary.lower()
+        else (vary or "Accept")
+    )
     return JSONResponse(
         {"detail": getattr(exc, "detail", "Not Found")},
         status_code=404,
-        headers=getattr(exc, "headers", None),
+        headers=headers,
     )
 
 

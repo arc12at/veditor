@@ -566,6 +566,15 @@ def test_404_page_not_found_browser(client: TestClient):
     assert "Page not found" in resp.text
     assert "Go to Homepage" in resp.text
     assert "HTTP 404" in resp.text
+    assert "Accept" in resp.headers.get("Vary", "")
+
+
+def test_404_page_not_found_xhtml(client: TestClient):
+    resp = client.get("/stud", headers={"Accept": "application/xhtml+xml"})
+    assert resp.status_code == 404
+    assert "text/html" in resp.headers.get("content-type", "")
+    assert "Page not found" in resp.text
+    assert "Accept" in resp.headers.get("Vary", "")
 
 
 def test_404_json_api(client: TestClient):
@@ -573,3 +582,27 @@ def test_404_json_api(client: TestClient):
     assert resp.status_code == 404
     assert "application/json" in resp.headers.get("content-type", "")
     assert resp.json() == {"detail": "Not Found"}
+    assert "Accept" in resp.headers.get("Vary", "")
+
+
+def test_404_content_negotiation_quality_values(client: TestClient):
+    # text/html;q=0 should reject HTML and fall back to JSON
+    resp = client.get("/stud", headers={"Accept": "text/html;q=0, application/json"})
+    assert resp.status_code == 404
+    assert "application/json" in resp.headers.get("content-type", "")
+    assert resp.json() == {"detail": "Not Found"}
+    assert "Accept" in resp.headers.get("Vary", "")
+
+    # application/json has higher quality than text/html
+    resp2 = client.get(
+        "/stud", headers={"Accept": "application/json;q=0.9, text/html;q=0.5"}
+    )
+    assert resp2.status_code == 404
+    assert "application/json" in resp2.headers.get("content-type", "")
+
+    # text/html has higher quality than application/json
+    resp3 = client.get(
+        "/stud", headers={"Accept": "text/html;q=0.9, application/json;q=0.5"}
+    )
+    assert resp3.status_code == 404
+    assert "text/html" in resp3.headers.get("content-type", "")

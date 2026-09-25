@@ -378,3 +378,19 @@ def test_normal_user_accessing_studio_events_redirects_to_studio_with_error(
     assert "You do not have the permission to access that page" in followed.text
     assert "alert alert-danger" in followed.text
     client.cookies.clear()
+
+
+def test_404_page_not_found_browser(client: TestClient):
+    resp = client.get("/stud", headers={"Accept": "text/html,application/xhtml+xml"})
+    assert resp.status_code == 404
+    assert "text/html" in resp.headers.get("content-type", "")
+    assert "Page not found" in resp.text
+    assert "Go to Homepage" in resp.text
+    assert "HTTP 404" in resp.text
+
+
+def test_404_json_api(client: TestClient):
+    resp = client.get("/stud", headers={"Accept": "application/json"})
+    assert resp.status_code == 404
+    assert "application/json" in resp.headers.get("content-type", "")
+    assert resp.json() == {"detail": "Not Found"}

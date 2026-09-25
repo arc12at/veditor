@@ -1,13 +1,28 @@
 from pathlib import Path
 
-from fastapi import FastAPI, Response
-from fastapi.responses import RedirectResponse
+from fastapi import FastAPI, Request, Response
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.queue import redis_conn
 from app.routes import admin, auth, client, events, jobs, ops, reviews, studio, talks
+from app.ui.templating import templates
 
 app = FastAPI(title="VEditor API")
+
+
+@app.exception_handler(404)
+async def not_found_handler(request: Request, exc: Exception) -> Response:
+    if "text/html" in request.headers.get("accept", ""):
+        return templates.TemplateResponse(
+            request, "404.html.jinja", {}, status_code=404
+        )
+    return JSONResponse(
+        {"detail": getattr(exc, "detail", "Not Found")},
+        status_code=404,
+        headers=getattr(exc, "headers", None),
+    )
+
 
 _STATIC_DIR = Path(__file__).parent / "ui" / "static"
 app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")

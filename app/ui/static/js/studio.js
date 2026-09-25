@@ -6,6 +6,11 @@ function getStudioShell() {
   return document.querySelector('.studio-shell');
 }
 
+function isStudioViewOnly() {
+  const shell = getStudioShell();
+  return Boolean(shell && shell.classList.contains('is-view-only'));
+}
+
 function getTalkId() {
   if (typeof window.TALK_ID !== 'undefined' && window.TALK_ID) return window.TALK_ID;
   const shell = getStudioShell();
@@ -33,6 +38,13 @@ function getPreviewUrls() {
     }
   }
   return [];
+}
+
+function getActiveVideoCategory() {
+  const cat = document.getElementById('media-source-select')?.selectedOptions?.[0]?.dataset?.category;
+  if (cat) return cat;
+  const src = (video && (video.currentSrc || video.src)) || getPreviewUrls()[0] || '';
+  return src.includes('/preview/') ? 'preview' : src.includes('/final/') ? 'final' : 'raw';
 }
 
 const shellInit = getStudioShell();
@@ -94,10 +106,15 @@ let waveformAbortController = null;
 
 const initShellBounds = getStudioShell();
 if (initShellBounds) {
-  const initCutStart = parseFloat(initShellBounds.dataset.cutStart);
-  const initCutEnd = parseFloat(initShellBounds.dataset.cutEnd);
-  if (!isNaN(initCutStart) && initCutStart >= 0) inPointSec = initCutStart;
-  if (!isNaN(initCutEnd) && initCutEnd > inPointSec) outPointSec = initCutEnd;
+  const start = parseFloat(initShellBounds.dataset.cutStart) || 0;
+  const end = parseFloat(initShellBounds.dataset.cutEnd) || 0;
+  if (getActiveVideoCategory() === 'preview') {
+    inPointSec = 0;
+    outPointSec = Math.max(0, end - start);
+  } else {
+    inPointSec = Math.max(0, start);
+    outPointSec = Math.max(inPointSec, end);
+  }
 }
 
 // ── Timecode Format & Parse ─────────────────────────────────────
@@ -328,7 +345,7 @@ function updateCutMarkersUI() {
   if (!dur || dur <= 0) return;
 
   const inPct  = Math.max(0, Math.min(100, (inPointSec / dur) * 100));
-  const outPct = Math.max(0, Math.min(100, (outPointSec / dur) * 100));
+  const outPct = Math.max(0, Math.min(100, ((outPointSec || dur) / dur) * 100));
 
   if (tlStartMarker) tlStartMarker.style.left = `${inPct}%`;
   if (tlEndMarker)   tlEndMarker.style.left   = `${outPct}%`;
@@ -359,16 +376,17 @@ function updateCutMarkersUI() {
 }
 
 function setInPoint(timeSec) {
-  const max = (video && Number.isFinite(video.duration) && video.duration > 0) ? video.duration : Infinity;
-  inPointSec = Math.min(max, Math.max(0, timeSec));
-  if (inPointSec > outPointSec) outPointSec = Math.min(max, inPointSec + 1);
+  if (isStudioViewOnly()) return;
+  const max = (video?.duration > 0) ? video.duration : Infinity;
+  inPointSec = Math.max(0, Math.min(timeSec, outPointSec > 0 ? outPointSec - 0.1 : max));
   boundsEdited = true;
   updateCutMarkersUI();
 }
 
 function setOutPoint(timeSec) {
-  const max = (video && Number.isFinite(video.duration) && video.duration > 0) ? video.duration : Infinity;
-  outPointSec = Math.min(max, Math.max(inPointSec + 0.1, timeSec));
+  if (isStudioViewOnly()) return;
+  const max = (video?.duration > 0) ? video.duration : Infinity;
+  outPointSec = Math.min(max, Math.max(timeSec, inPointSec + 0.1));
   boundsEdited = true;
   updateCutMarkersUI();
 }
@@ -415,6 +433,7 @@ function setupMarkerDrag(markerEl, isStart) {
   let activePointerId = null;
 
   markerEl.addEventListener('pointerdown', e => {
+    if (isStudioViewOnly()) return;
     if (activePointerId !== null) return;
     e.preventDefault();
     e.stopPropagation();
@@ -431,7 +450,9 @@ function setupMarkerDrag(markerEl, isStart) {
 
       if (isStart) setInPoint(timeAtCursor);
       else setOutPoint(timeAtCursor);
-      if (video && video.duration) video.currentTime = timeAtCursor;
+      if (video && video.duration) {
+        video.currentTime = isStart ? inPointSec : outPointSec;
+      }
     }
 
     function onPointerUp(ev) {
@@ -525,24 +546,16 @@ if (video) {
   });
   function initializeVideoMetadata() {
     if (scrubber) scrubber.max = 1000;
-    const duration = video.duration || 10;
+    const duration = (video?.duration > 0) ? video.duration : 10;
     if (!boundsEdited) {
       const shell = getStudioShell() || shellInit;
-      const activeRow = document.querySelector(`.media-asset-row[data-asset-url="${video.src}"]`);
-      const isRaw = (video.src && video.src.includes('/raw/')) || activeRow?.dataset.assetCategory === 'raw';
-
-      if (isRaw) {
-        const rawStart = shell && shell.dataset.cutStart !== undefined && shell.dataset.cutStart !== '' ? parseFloat(shell.dataset.cutStart) : NaN;
-        const rawEnd = shell && shell.dataset.cutEnd !== undefined && shell.dataset.cutEnd !== '' ? parseFloat(shell.dataset.cutEnd) : NaN;
-        inPointSec = (!isNaN(rawStart) && rawStart >= 0) ? rawStart : 0;
-        outPointSec = (!isNaN(rawEnd) && rawEnd > inPointSec) ? rawEnd : duration;
-      } else {
-        inPointSec = 0;
-        outPointSec = duration;
-      }
-
-      inPointSec = Math.max(0, Math.min(inPointSec, duration > 0.1 ? duration - 0.1 : 0));
-      outPointSec = Math.min(duration, Math.max(outPointSec, inPointSec + 0.1));
+      const isRaw = getActiveVideoCategory() === 'raw';
+      const rawStart = isRaw ? parseFloat(shell?.dataset?.cutStart) : NaN;
+      const rawEnd = isRaw ? parseFloat(shell?.dataset?.cutEnd) : NaN;
+      inPointSec = (!isNaN(rawStart) && rawStart >= 0) ? Math.min(rawStart, duration - 0.1) : 0;
+      outPointSec = (!isNaN(rawEnd) && rawEnd > inPointSec) ? Math.min(duration, rawEnd) : duration;
+    } else if (outPointSec <= 0 || outPointSec > duration) {
+      outPointSec = duration;
     }
     updateTimecode();
     updateTimelineTicks();
@@ -613,9 +626,9 @@ document.addEventListener('keydown', e => {
 });
 
 // ── Interactive Pipeline Actions ────────────────────────────────
-async function postAPI(path, body = {}) {
+async function postAPI(path, body = {}, method = 'POST') {
   const res = await (window.authFetch || fetch)(path, {
-    method: 'POST',
+    method,
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
@@ -626,7 +639,7 @@ async function postAPI(path, body = {}) {
   return res.json();
 }
 
-function setBtnBusy(btn, isBusy, busyText) {
+function setBtnBusy(btn, isBusy, busyText = 'Processing...') {
   if (!btn) return;
   btn.disabled = isBusy;
   if (isBusy) {
@@ -638,6 +651,7 @@ function setBtnBusy(btn, isBusy, busyText) {
 }
 
 window.approveTalk = async function(id) {
+  if (isStudioViewOnly()) return;
   if (!id || typeof id !== 'number') id = getTalkId();
   const notes = (document.getElementById('review-notes-input') || {}).value || '';
   const btn = document.getElementById('btn-approve');
@@ -671,12 +685,11 @@ window.approveTalk = async function(id) {
     if (talkStatus === 'pending_approval') {
       await postAPI(`/talks/${id}/approve`, { decision: 'approve' });
     } else if (talkStatus === 'pending_bounds' || talkStatus === 'needs_work') {
-      const dur = video && Number.isFinite(video.duration) && video.duration > 0 ? video.duration : (outPointSec || 10);
-      const clampedIn = Math.max(0, Math.min(inPointSec, dur > 0.1 ? dur - 0.1 : 0));
+      const dur = (video?.duration > 0) ? video.duration : (outPointSec || 10);
+      const clampedIn = Math.max(0, Math.min(inPointSec, dur - 0.1));
       const clampedOut = Math.min(dur, Math.max(outPointSec, clampedIn + 0.1));
-      const cutStart = formatTimecode(clampedIn);
-      const cutEnd = formatTimecode(clampedOut);
-      const cutPayload = { cut_start: cutStart, cut_end: cutEnd };
+      const base = getActiveVideoCategory() === 'preview' ? (parseFloat(getStudioShell()?.dataset?.cutStart) || 0) : 0;
+      const cutPayload = { cut_start: formatTimecode(clampedIn + base), cut_end: formatTimecode(clampedOut + base) };
       if (notes) cutPayload.note = notes;
       await postAPI(`/talks/${id}/cut`, cutPayload);
     } else if (talkStatus === 'preview') {
@@ -709,13 +722,16 @@ window.approveTalk = async function(id) {
       if (includeIntro && introSource === 'custom') customIntroPath = await uploadCustomBumper('intro', customIntroPath);
       if (includeOutro && outroSource === 'custom') customOutroPath = await uploadCustomBumper('outro', customOutroPath);
 
-      await postAPI(`/talks/${id}/assemble`, {
+      const speakerEmailInput = document.getElementById('handoff-speaker-email');
+      const emailVal = speakerEmailInput ? speakerEmailInput.value.trim() : '';
+      await postAPI(`/talks/${id}/handoff`, {
         include_intro: includeIntro,
         include_outro: includeOutro,
         intro_source: introSource,
         outro_source: outroSource,
         custom_intro_path: (includeIntro && introSource === 'custom') ? customIntroPath : null,
         custom_outro_path: (includeOutro && outroSource === 'custom') ? customOutroPath : null,
+        speaker_email: emailVal || null,
       });
     } else {
       await postAPI(`/talks/${id}/approve`, { decision: 'approve' });
@@ -732,29 +748,111 @@ window.approveTalk = async function(id) {
 };
 
 
-window.rejectTalk = async function(id) {
+window.abortTalk = function(id) {
+  if (isStudioViewOnly()) return;
   if (!id || typeof id !== 'number') id = getTalkId();
+  const modal = document.getElementById('modal-abort');
+  if (modal) {
+    modal.hidden = false;
+    modal.classList.add('active');
+    modal.dataset.talkId = id;
+  }
+};
+
+window.closeAbortModal = function() {
+  const modal = document.getElementById('modal-abort');
+  if (modal) {
+    modal.hidden = true;
+    modal.classList.remove('active');
+  }
+};
+
+window.confirmAbortTalk = async function() {
+  if (isStudioViewOnly()) return;
+  const modal = document.getElementById('modal-abort');
+  if (!modal) return;
+  const id = modal.dataset.talkId;
+  const btn = document.getElementById('btn-confirm-abort');
+  setBtnBusy(btn, true, 'Aborting...');
+  try {
+    await postAPI(`/talks/${id}/abort`);
+    location.reload();
+  } catch (err) {
+    alert(`Abort failed: ${err.message}`);
+    setBtnBusy(btn, false);
+    modal.classList.remove('active');
+    modal.hidden = true;
+  }
+};
+
+window.openResetRawModal = function(id) {
+  if (isStudioViewOnly()) return;
+  if (!id || typeof id !== 'number') id = getTalkId();
+  const modal = document.getElementById('modal-reset-raw');
+  if (modal) {
+    modal.hidden = false;
+    modal.classList.add('active');
+    modal.dataset.talkId = id;
+  }
+};
+
+window.closeResetRawModal = function() {
+  const modal = document.getElementById('modal-reset-raw');
+  if (modal) {
+    modal.hidden = true;
+    modal.classList.remove('active');
+  }
+};
+
+window.confirmResetRawTalk = async function() {
+  if (isStudioViewOnly()) return;
+  const modal = document.getElementById('modal-reset-raw');
+  if (!modal) return;
+  const id = modal.dataset.talkId || getTalkId();
+  const btn = document.getElementById('btn-confirm-reset-raw');
+  setBtnBusy(btn, true, 'Resetting...');
+  const notes = (document.getElementById('review-notes-input') || {}).value || '';
+  try {
+    await postAPI(`/talks/${id}/review`, {
+      decision: 'reject',
+      note: notes || 'Reset talk to raw video',
+    });
+    location.reload();
+  } catch (err) {
+    alert(`Reset failed: ${err.message}`);
+    setBtnBusy(btn, false);
+    modal.classList.remove('active');
+    modal.hidden = true;
+  }
+};
+
+window.rejectTalk = async function(id) {
+  if (isStudioViewOnly()) return;
+  if (!id || typeof id !== 'number') id = getTalkId();
+  const talkStatus = getTalkStatus();
+  if (talkStatus === 'preview') {
+    window.openResetRawModal(id);
+    return;
+  }
   const notes = (document.getElementById('review-notes-input') || {}).value || '';
   if (!confirm('Reject this talk?')) return;
   const btn = document.getElementById('btn-reject');
   setBtnBusy(btn, true, 'Rejecting...');
   try {
-    const talkStatus = getTalkStatus();
-    if (talkStatus === 'preview') {
-      await postAPI(`/talks/${id}/review`, { decision: 'reject', note: notes || 'Rejected in review studio' });
-    } else if (talkStatus === 'pending_approval') {
+    if (talkStatus === 'pending_approval') {
       await postAPI(`/talks/${id}/approve`, { decision: 'reject' });
     } else {
       await postAPI(`/talks/${id}/abort`);
     }
     location.reload();
   } catch (err) {
-    alert(`Rejection failed: ${err.message}`);
+    alert(`Reject failed: ${err.message}`);
     setBtnBusy(btn, false);
   }
 };
 
 window.requestChangesTalk = async function(id) {
+  if (isStudioViewOnly()) return;
   if (!id || typeof id !== 'number') id = getTalkId();
   const notes = (document.getElementById('review-notes-input') || {}).value || '';
   const btn = document.getElementById('btn-needs-work');
@@ -769,6 +867,7 @@ window.requestChangesTalk = async function(id) {
 };
 
 window.retryTalk = async function(id) {
+  if (isStudioViewOnly()) return;
   if (!id || typeof id !== 'number') id = getTalkId();
   const btn = document.getElementById('btn-retry');
   setBtnBusy(btn, true, 'Resetting...');
@@ -780,8 +879,8 @@ window.retryTalk = async function(id) {
     setBtnBusy(btn, false);
   }
 };
-
 window.handleVideoFileUpload = async function(e, talkId) {
+  if (isStudioViewOnly()) return;
   if (!talkId || typeof talkId !== 'number') talkId = getTalkId();
   const file = e.target.files ? e.target.files[0] : (e.dataTransfer ? e.dataTransfer.files[0] : null);
   if (!file) return;
@@ -828,7 +927,216 @@ window.handleVideoFileUpload = async function(e, talkId) {
   }
 };
 
+// ── Admin View-Only Mode Handling ───────────────────────────────
+function initAdminViewOnlyMode() {
+  const shell = getStudioShell();
+  if (!shell || shell.dataset.isOtherOrganizer !== 'true') return;
 
+  const sessionKey = 'studio_edit_unlocked_' + getTalkId();
+  const banner = document.getElementById('admin-view-only-banner');
+  const badge = document.getElementById('banner-mode-badge');
+  const desc = document.getElementById('banner-mode-text');
+  const toggleBtn = document.getElementById('btn-toggle-edit-mode');
+  const modal = document.getElementById('admin-confirm-edit-modal');
+  const toggleModal = show => { if (modal) modal.hidden = !show; };
+
+  function applyLockState(unlocked) {
+    shell.classList.toggle('is-view-only', !unlocked);
+    if (banner) banner.classList.toggle('is-edit-active', unlocked);
+    if (badge) {
+      badge.className = unlocked ? 'badge badge-success' : 'badge badge-warning';
+      badge.textContent = unlocked ? 'Edit Mode Active' : 'View Only';
+    }
+    if (desc) {
+      if (unlocked) {
+        desc.textContent =
+          'Edit mode enabled. You can now modify cut bounds, upload recordings, and execute pipeline actions.';
+      } else if (desc.dataset.defaultText) {
+        const eventName = desc.dataset.eventName;
+        if (eventName) {
+          desc.textContent = "Viewing another organizer's talk (";
+          const strong = document.createElement('strong');
+          strong.textContent = eventName;
+          desc.appendChild(strong);
+          desc.appendChild(document.createTextNode('). Editing and pipeline actions are locked.'));
+        } else {
+          desc.textContent = desc.dataset.defaultText;
+        }
+      }
+    }
+    if (toggleBtn) {
+      toggleBtn.className = unlocked ? 'btn btn-ghost btn-sm' : 'btn btn-warning btn-sm';
+      toggleBtn.innerHTML = unlocked
+        ? '<svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> <span>Lock (View Only)</span>'
+        : '<svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg> <span>Enable Edit Mode</span>';
+    }
+    const editControlsSelector =
+      '[data-edit-control], .upload-pending-container input, .upload-pending-container button, .timeline-inputs-bar input, .timeline-inputs-bar button, .review-box input, .review-box button, .review-box textarea, .studio-panel-body input, .studio-panel-body button, .studio-panel-body textarea';
+    shell.querySelectorAll(editControlsSelector).forEach(el => {
+      if (
+        el.closest('#admin-view-only-banner') ||
+        el.closest('#admin-confirm-edit-modal') ||
+        el.closest('.studio-panel-header') ||
+        el.id === 'btn-toggle-right-panel' ||
+        el.id === 'btn-expand-right-panel'
+      ) {
+        return;
+      }
+      if (unlocked) {
+        if (el.dataset.viewLocked === 'true') {
+          el.disabled = el.dataset.operationalDisabled === 'true';
+          if (el.tagName === 'TEXTAREA' || el.type === 'text') {
+            el.readOnly = el.dataset.operationalReadOnly === 'true';
+            delete el.dataset.operationalReadOnly;
+          }
+          delete el.dataset.operationalDisabled;
+          delete el.dataset.viewLocked;
+        }
+      } else {
+        if (el.dataset.viewLocked !== 'true') {
+          el.dataset.viewLocked = 'true';
+          el.dataset.operationalDisabled = el.disabled ? 'true' : 'false';
+          if (el.tagName === 'TEXTAREA' || el.type === 'text') {
+            el.dataset.operationalReadOnly = el.readOnly ? 'true' : 'false';
+          }
+        }
+        el.disabled = true;
+        if (el.tagName === 'TEXTAREA' || el.type === 'text') {
+          el.readOnly = true;
+        }
+      }
+    });
+  }
+
+  applyLockState(sessionStorage.getItem(sessionKey) === 'true');
+
+  if (toggleBtn) {
+    toggleBtn.addEventListener('click', () => {
+      if (sessionStorage.getItem(sessionKey) === 'true') {
+        sessionStorage.removeItem(sessionKey);
+        applyLockState(false);
+      } else {
+        toggleModal(true);
+      }
+    });
+  }
+
+  const cancelBtn = document.getElementById('btn-modal-cancel');
+  const closeXBtn = document.getElementById('btn-modal-close-x');
+  const confirmBtn = document.getElementById('btn-modal-confirm');
+
+  if (cancelBtn) cancelBtn.addEventListener('click', () => toggleModal(false));
+  if (closeXBtn) closeXBtn.addEventListener('click', () => toggleModal(false));
+  if (modal) modal.addEventListener('click', e => { if (e.target === modal) toggleModal(false); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && modal && !modal.hidden) toggleModal(false); });
+
+  if (confirmBtn) {
+    confirmBtn.addEventListener('click', () => {
+      sessionStorage.setItem(sessionKey, 'true');
+      toggleModal(false);
+      applyLockState(true);
+    });
+  }
+}
+
+// ── Real-time Recent Jobs Polling & Dynamic Rendering ─────────────
+function renderRecentJobs(jobs) {
+  const container = document.getElementById('jobs-container');
+  const empty = document.getElementById('jobs-empty');
+  if (!container && !empty) return;
+  if (!jobs || jobs.length === 0) {
+    if (container) {
+      container.textContent = '';
+      container.style.display = 'none';
+    }
+    if (empty) empty.style.display = 'block';
+    return;
+  }
+
+  if (empty) empty.style.display = 'none';
+  if (!container) return;
+
+  container.textContent = '';
+  container.style.display = 'flex';
+
+  jobs.forEach(job => {
+    const isRunning = job.status === 'running';
+    const isDone = job.status === 'done' || job.status === 'success';
+    const isFailed = job.status === 'failed';
+    const badgeClass = isDone ? 'badge-done' : (isRunning ? 'badge-processing' : (isFailed ? 'badge-danger' : 'badge-waiting'));
+
+    const card = document.createElement('div');
+    card.className = 'job-card';
+    if (job.id) card.dataset.jobId = String(job.id);
+
+    const header = document.createElement('div');
+    header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;';
+
+    const kindSpan = document.createElement('span');
+    kindSpan.style.cssText = 'font-family:var(--v-font-mono);font-weight:600;';
+    kindSpan.textContent = job.kind || '';
+
+    const badgeGroup = document.createElement('div');
+    badgeGroup.style.cssText = 'display:flex;align-items:center;gap:5px;';
+
+    if (job.progress_pct !== null && job.progress_pct !== undefined && isRunning) {
+      const progressBadge = document.createElement('span');
+      progressBadge.className = 'badge badge-info';
+      progressBadge.style.cssText = 'font-size:0.65rem;padding:1px 5px;';
+      progressBadge.textContent = `${Math.round(job.progress_pct)}%`;
+      badgeGroup.appendChild(progressBadge);
+    }
+
+    const statusBadge = document.createElement('span');
+    statusBadge.className = `badge ${badgeClass}`;
+    statusBadge.style.cssText = 'font-size:0.65rem;padding:1px 5px;';
+    if (isRunning) {
+      const spinner = document.createElement('span');
+      spinner.className = 'spinner spinner-sm';
+      statusBadge.appendChild(spinner);
+    }
+    statusBadge.appendChild(document.createTextNode(job.status || ''));
+    badgeGroup.appendChild(statusBadge);
+
+    header.appendChild(kindSpan);
+    header.appendChild(badgeGroup);
+    card.appendChild(header);
+
+    if (isRunning && job.progress_pct !== null && job.progress_pct !== undefined) {
+      const track = document.createElement('div');
+      track.className = 'job-progress-track';
+      const fill = document.createElement('div');
+      fill.className = 'job-progress-fill animated';
+      fill.style.width = `${Math.min(100, Math.max(0, job.progress_pct))}%`;
+      track.appendChild(fill);
+      card.appendChild(track);
+    }
+
+    if (job.started_at) {
+      const d = new Date(job.started_at);
+      const timeStr = !isNaN(d.getTime()) ? `${d.toISOString().slice(11, 19)} UTC` : '';
+      const meta = document.createElement('div');
+      meta.className = 'job-timing-meta';
+
+      const startedSpan = document.createElement('span');
+      startedSpan.textContent = `Started ${timeStr}`;
+      meta.appendChild(startedSpan);
+
+      if (isRunning && job.estimated_remaining !== null && job.estimated_remaining !== undefined) {
+        const remSpan = document.createElement('span');
+        remSpan.textContent = `~${Math.round(job.estimated_remaining)}s remaining`;
+        meta.appendChild(remSpan);
+      } else if (job.elapsed_time !== null && job.elapsed_time !== undefined) {
+        const elSpan = document.createElement('span');
+        elSpan.textContent = `${Math.round(job.elapsed_time)}s elapsed`;
+        meta.appendChild(elSpan);
+      }
+      card.appendChild(meta);
+    }
+
+    container.appendChild(card);
+  });
+}
 
 // ── Collapsible Right Sidebar ────────────────────────────────────
 function initRightPanelCollapse() {
@@ -996,6 +1304,8 @@ function startStudioPolling() {
 
 // ── Initial Setup & Event Listeners ─────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
+  initAdminViewOnlyMode();
+
   // Sync progress bars width from data-progress attribute
   document.querySelectorAll('.job-progress-fill[data-progress]').forEach(el => {
     const p = parseFloat(el.getAttribute('data-progress'));
@@ -1073,6 +1383,13 @@ document.addEventListener('DOMContentLoaded', () => {
   const actionBtns = document.getElementById('action-btns');
   if (actionBtns) {
     actionBtns.addEventListener('click', (e) => {
+      const proceedBtn = e.target.closest('#btn-proceed-handoff');
+      const backBtn = e.target.closest('#btn-back-bumpers');
+      if (proceedBtn || backBtn) {
+        document.getElementById('card-bumper-options')?.classList.toggle('is-hidden', !!proceedBtn);
+        document.getElementById('card-speaker-handoff')?.classList.toggle('is-hidden', !proceedBtn);
+        return;
+      }
       const approveBtn = e.target.closest('#btn-approve');
       if (approveBtn) {
         window.approveTalk(getTalkId());
@@ -1088,18 +1405,123 @@ document.addEventListener('DOMContentLoaded', () => {
         window.requestChangesTalk(getTalkId());
         return;
       }
-      const retryBtn = e.target.closest('#btn-retry');
-      if (retryBtn) {
-        window.retryTalk(getTalkId());
+      const abortBtn = e.target.closest('#btn-abort');
+      if (abortBtn) {
+        window.abortTalk(getTalkId());
         return;
       }
     });
   }
 
+  document.addEventListener('click', (e) => {
+    const closeBtn = e.target.closest('.btn-close-modal, [id^="btn-close-"], [id^="btn-cancel-"]');
+    if (closeBtn || e.target.classList.contains('modal-backdrop')) {
+      const targetModal = closeBtn ? closeBtn.closest('.modal-backdrop') : e.target;
+      if (targetModal) {
+        targetModal.classList.remove('active');
+        targetModal.hidden = true;
+      }
+      return;
+    }
+    if (e.target.closest('#btn-confirm-abort')) return window.confirmAbortTalk();
+    if (e.target.closest('#btn-confirm-reset-raw')) return window.confirmResetRawTalk();
+    const btn = e.target.closest('.btn-play-asset');
+    if (!btn) return;
+    const url = btn.getAttribute('data-asset-url') || btn.closest('.media-asset-row')?.getAttribute('data-asset-url');
+    if (url) window.loadVideoSrc(url);
+  });
+
   // Auto-poll status when in background processing states
   const activeProcessingStates = ['detecting', 'cutting', 'generating_previews', 'assembling', 'transcoding', 'uploading'];
   const currentTalkStatus = getTalkStatus();
   const currentTalkId = getTalkId();
+
+  const editBtn = document.getElementById('btn-edit-talk-studio');
+  const editModal = document.getElementById('modal-edit-talk-studio');
+  if (editBtn && editModal) {
+    editBtn.addEventListener('click', () => {
+      const shell = getStudioShell();
+      if (!shell) return;
+      document.getElementById('edit-talk-title').value = shell.dataset.talkTitle || '';
+      document.getElementById('edit-talk-room').value = shell.dataset.talkRoom || '';
+      const toLocalInputFormat = (isoString) => {
+        if (!isoString) return '';
+        const d = new Date(isoString);
+        if (isNaN(d.getTime())) return '';
+        return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+      };
+      
+      document.getElementById('edit-talk-start').value = toLocalInputFormat(shell.dataset.talkStart);
+      document.getElementById('edit-talk-end').value = toLocalInputFormat(shell.dataset.talkEnd);
+      editModal.style.display = 'flex';
+    });
+
+    editModal.querySelectorAll('.btn-close-edit-talk, .dashboard-modal-close').forEach(b => {
+      b.addEventListener('click', () => { editModal.style.display = 'none'; });
+    });
+    editModal.addEventListener('click', e => {
+      if (e.target === editModal) editModal.style.display = 'none';
+    });
+
+    const submitBtn = document.getElementById('btn-submit-edit-talk-studio');
+    if (submitBtn) {
+      submitBtn.addEventListener('click', async () => {
+        const title = document.getElementById('edit-talk-title').value.trim();
+        const rawRoom = (document.getElementById('edit-talk-room') || {}).value || '';
+        const room = rawRoom.trim() || null;
+        const startVal = document.getElementById('edit-talk-start').value;
+        const endVal = document.getElementById('edit-talk-end').value;
+
+        const shell = getStudioShell();
+        const origStart = shell ? shell.dataset.talkStart : '';
+        const origEnd = shell ? shell.dataset.talkEnd : '';
+
+        if (!title) {
+          alert('Talk title is required.');
+          return;
+        }
+        if ((origStart && !startVal) || (origEnd && !endVal)) {
+          alert('Cannot clear scheduled talk times.');
+          return;
+        }
+        if (startVal && endVal && new Date(endVal) <= new Date(startVal)) {
+          alert('End time must be after start time.');
+          return;
+        }
+
+        const origText = submitBtn.textContent;
+        submitBtn.disabled = true;
+        submitBtn.textContent = '';
+        const sp = document.createElement('span');
+        sp.className = 'spinner spinner-sm';
+        submitBtn.appendChild(sp);
+        submitBtn.appendChild(document.createTextNode(' Saving...'));
+
+        try {
+          const payload = { title, room };
+          if (startVal) payload.start = new Date(startVal).toISOString();
+          if (endVal) payload.end = new Date(endVal).toISOString();
+
+          const res = await (window.authFetch || fetch)(`/talks/${currentTalkId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify(payload),
+          });
+
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || `Server returned ${res.status}`);
+          }
+          window.location.reload();
+        } catch (err) {
+          alert(`Failed to update talk: ${err.message}`);
+          submitBtn.disabled = false;
+          submitBtn.textContent = origText;
+        }
+      });
+    }
+  }
 
   if (activeProcessingStates.includes(currentTalkStatus) && currentTalkId) {
     const pollInterval = setInterval(async () => {

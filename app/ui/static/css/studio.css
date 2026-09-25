@@ -1,13 +1,15 @@
 /* ── Studio Detail View Styles (studio.html) ────────────────────── */
 
-.breadcrumb-back {
+.breadcrumb-back,
+a.breadcrumb-event {
   color: var(--v-text-secondary);
   text-decoration: none;
   font-weight: 500;
   transition: color 0.15s ease;
 }
 
-.breadcrumb-back:hover {
+.breadcrumb-back:hover,
+a.breadcrumb-event:hover {
   color: var(--v-primary);
 }
 
@@ -22,6 +24,11 @@
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 340px;
+}
+
+.breadcrumb-edit-btn {
+  padding: 2px 6px;
+  color: var(--v-text-muted);
 }
 
 .topbar-time-meta {
@@ -46,7 +53,54 @@
   overflow: hidden;
 }
 
+/* ── Speaker Preview Quality Notice (Floating Area) ───────────── */
+.preview-quality-notice {
+  position: absolute;
+  top: 14px;
+  left: 16px;
+  z-index: 10;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  background: rgba(15, 23, 42, 0.82);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 9999px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  color: #e2e8f0;
+  font-size: 0.78rem;
+  line-height: 1.3;
+  pointer-events: none;
+  max-width: calc(100% - 32px);
+  white-space: nowrap;
+}
+
+.preview-quality-icon {
+  color: #60a5fa;
+  flex-shrink: 0;
+}
+
+.preview-quality-text strong {
+  color: #ffffff;
+  font-weight: 600;
+}
+
+@media (max-width: 768px) {
+  .preview-quality-notice {
+    left: 12px;
+    right: 12px;
+    white-space: normal;
+    text-align: left;
+    font-size: 0.72rem;
+    padding: 6px 12px;
+    top: 8px;
+  }
+}
+
 .player-viewport {
+  position: relative;
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
@@ -934,6 +988,10 @@
   color: var(--v-primary);
 }
 
+.studio-shell[data-is-other-organizer="true"] .expand-panel-tab {
+  top: 60px;
+}
+
 #studio-panel-right {
   transition: opacity 0.2s ease, width 0.25s ease;
 }
@@ -965,6 +1023,40 @@
   margin-bottom: 12px;
 }
 
+.bumper-studio-card .btn {
+  width: 100%;
+}
+
+.bumper-handoff-card {
+  margin-top: 1rem;
+}
+
+.handoff-email-input {
+  margin-top: 0.5rem;
+}
+
+.assigned-speaker-display {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 0.5rem;
+  padding: 8px 12px;
+  background: var(--v-bg-card);
+  border: 1px solid var(--v-border-subtle);
+  border-radius: var(--v-radius-sm);
+  color: var(--v-text-primary);
+  font-size: 0.82rem;
+}
+
+.assigned-speaker-icon {
+  color: var(--v-text-muted);
+  flex-shrink: 0;
+}
+
+.assigned-speaker-email {
+  font-weight: 500;
+  word-break: break-all;
+}
 .bumper-studio-title {
   font-size: 0.72rem;
   font-weight: 700;
@@ -1284,3 +1376,97 @@
   flex-shrink: 0;
 }
 
+.is-hidden {
+  display: none;
+}
+
+.btn-step-spacing {
+  margin-top: 8px;
+}
+
+/* ── Admin View-Only Banner & Locked Controls ──────────────────── */
+.admin-view-only-banner {
+  background: rgba(245, 158, 11, 0.08);
+  border-bottom: 1px solid rgba(245, 158, 11, 0.25);
+  padding: 10px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  transition: background 0.2s ease, border-color 0.2s ease;
+  flex-shrink: 0;
+}
+
+.admin-view-only-banner.is-edit-active {
+  background: rgba(34, 197, 94, 0.08);
+  border-bottom-color: rgba(34, 197, 94, 0.25);
+}
+
+.banner-info-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.banner-text-desc {
+  font-size: 0.82rem;
+  color: var(--v-text-primary);
+}
+
+.banner-actions-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* View-Only Mode Disabled Overrides */
+.studio-shell.is-view-only .action-btns,
+.studio-shell.is-view-only .upload-dropzone-box,
+.studio-shell.is-view-only .upload-pending-container,
+.studio-shell.is-view-only .slates-box,
+.studio-shell.is-view-only .bumper-studio-card,
+.studio-shell.is-view-only .review-notes-wrap,
+.studio-shell.is-view-only #btn-set-in,
+.studio-shell.is-view-only #btn-set-out,
+.studio-shell.is-view-only #input-in-point,
+.studio-shell.is-view-only #input-out-point {
+  opacity: 0.5;
+  pointer-events: none;
+  cursor: not-allowed;
+  user-select: none;
+}
+
+.studio-shell.is-view-only #video-file-input {
+  display: none;
+}
+
+.studio-shell.is-view-only #tl-start-marker,
+.studio-shell.is-view-only #tl-end-marker {
+  pointer-events: none;
+  cursor: default;
+  opacity: 0.6;
+}
+
+/* Modal Typography */
+.modal-warning-intro {
+  font-size: 0.92rem;
+  margin-bottom: 10px;
+  color: var(--v-text-primary);
+}
+
+.modal-warning-details {
+  font-size: 0.85rem;
+  color: var(--v-text-secondary);
+  margin-bottom: 14px;
+  line-height: 1.45;
+}
+
+.modal-warning-question {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--v-text-primary);
+  margin-bottom: 0;
+}

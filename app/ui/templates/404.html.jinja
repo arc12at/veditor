@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Page Not Found — VEditor</title>
-  <link rel="stylesheet" href="/static/css/error.css">
+  <link rel="stylesheet" href="{{ url_for('static', path='css/error.css') }}">
 </head>
 <body class="error-fullscreen-body">
   <main class="error-fullscreen-container">
@@ -16,7 +16,7 @@
     </svg>
     <h1 class="error-fullscreen-title">Page not found</h1>
     <p class="error-fullscreen-description">The page you are looking for may have been removed, renamed, or the URL may be incorrect.</p>
-    <a href="/" class="error-home-btn">Go to Homepage</a>
+    <a href="{{ request.scope.get('root_path', '') or '/' }}" class="error-home-btn">Go to Homepage</a>
     <p class="error-http-code">HTTP 404</p>
   </main>
 </body>

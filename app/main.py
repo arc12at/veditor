@@ -1,5 +1,5 @@
+from collections.abc import MutableMapping
 from pathlib import Path
-from typing import Any
 
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -70,15 +70,15 @@ def _prefers_html(accept: str | None) -> bool:
     return False
 
 
-def _add_vary_accept(headers: dict[str, str] | Any) -> None:
+def _add_vary_accept(headers: MutableMapping[str, str]) -> None:
     vary_key = next((k for k in headers if k.lower() == "vary"), None)
     if not vary_key:
         headers["Vary"] = "Accept"
         return
-    vary = headers[vary_key]
-    fields = [f.strip().lower() for f in vary.split(",")]
-    if "accept" not in fields:
-        headers[vary_key] = f"{vary}, Accept"
+    tokens = [t.strip() for t in headers[vary_key].split(",") if t.strip()]
+    if not any(t.lower() == "accept" for t in tokens):
+        tokens.append("Accept")
+        headers[vary_key] = ", ".join(tokens)
 
 
 @app.exception_handler(404)
@@ -90,7 +90,8 @@ async def not_found_handler(request: Request, exc: Exception) -> Response:
             request, "404.html.jinja", {}, status_code=404
         )
         for k, v in exc_headers.items():
-            response.headers[k] = v
+            if k.lower() not in ("content-type", "content-length"):
+                response.headers[k] = v
         _add_vary_accept(response.headers)
         return response
 

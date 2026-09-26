@@ -556,13 +556,13 @@ if (video) {
     } else if (outPointSec <= 0 || outPointSec > duration) {
       outPointSec = duration;
     }
-    updateTimecode();
-    updateTimelineTicks();
-    updateCutMarkersUI();
     // Seek playhead to pre-seeded inPoint so the speaker sees their talk start, not 00:00.
     if (!boundsEdited && inPointSec > 0 && video.duration > inPointSec) {
       video.currentTime = inPointSec;
     }
+    updateTimecode();
+    updateTimelineTicks();
+    updateCutMarkersUI();
     if (durationDisplay) durationDisplay.textContent = `/ ${formatTimecode(video.duration)}`;
     const lbl = document.getElementById('tl-range-label');
     if (lbl) lbl.textContent = formatTimecode(video.duration);

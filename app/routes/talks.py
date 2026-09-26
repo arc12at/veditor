@@ -290,13 +290,23 @@ def ingest_recording(
     db.commit()
     db.refresh(talk)
 
-    light_queue.enqueue(
-        job_detect,
-        talk.id,
-        raw_key,
-        payload.recording_start,
-        job_timeout=STAGE_CONFIG["detect"]["job_timeout"],
-    )
+    if payload.source_path:
+        light_queue.enqueue(
+            job_ingest,
+            talk.id,
+            payload.source_path,
+            raw_key,
+            payload.recording_start,
+            job_timeout=STAGE_CONFIG["ingest"]["job_timeout"],
+        )
+    else:
+        light_queue.enqueue(
+            job_detect,
+            talk.id,
+            raw_key,
+            payload.recording_start,
+            job_timeout=STAGE_CONFIG["detect"]["job_timeout"],
+        )
 
     return schemas.TalkRead.model_validate(talk)
 

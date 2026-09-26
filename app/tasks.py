@@ -115,7 +115,12 @@ def _get_scratch_dir(storage) -> Path | None:
     return None
 
 
-def job_ingest(talk_id: int, staged_path: str, raw_key: str | None = None) -> None:
+def job_ingest(
+    talk_id: int,
+    staged_path: str,
+    raw_key: str | None = None,
+    recording_start: datetime | None = None,
+) -> None:
     raw_key = raw_key or f"{talk_id}/raw/raw.mp4"
     job_id = None
     storage = get_storage_backend()
@@ -189,6 +194,7 @@ def job_ingest(talk_id: int, staged_path: str, raw_key: str | None = None) -> No
             job_detect,
             talk_id,
             raw_key,
+            recording_start,
             job_timeout=STAGE_CONFIG["detect"]["job_timeout"],
         )
     except Exception as exc:
@@ -270,6 +276,8 @@ def job_detect(
                 and talk.end is not None
                 and result.actual_duration_seconds
             ):
+                if isinstance(recording_start, str):
+                    recording_start = datetime.fromisoformat(recording_start)
                 rec_s = (
                     recording_start
                     if recording_start.tzinfo is not None

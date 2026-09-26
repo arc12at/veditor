@@ -560,6 +560,7 @@ def test_post_recording_success_enqueues_detect():
             job_detect,
             1,
             "1/raw/video.mp4",
+            None,
             job_timeout=STAGE_CONFIG["detect"]["job_timeout"],
         )
 
@@ -1276,6 +1277,7 @@ def test_full_pipeline_flow_recordings_to_preview_halt():
             job_detect,
             1,
             "1/raw/session.mp4",
+            None,
             job_timeout=300,
         )
 

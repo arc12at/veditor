@@ -246,6 +246,7 @@ def job_detect(
             raw_path,
             scheduled_start=scheduled_start,
             scheduled_end=scheduled_end,
+            is_room_recording=recording_start is not None,
         )
         if not result.passed:
             raise ValueError(f"Detection failed: {result.reason}")

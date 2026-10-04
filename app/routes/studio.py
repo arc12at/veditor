@@ -16,13 +16,13 @@ from redis.exceptions import RedisError
 from sqlalchemy import and_, func
 from sqlalchemy.orm import Session, selectinload
 
-from app import models
+from app import models, schemas
 from app.auth import CurrentUser, hash_api_key
 from app.config import settings
 from app.db import get_db
 from app.queue import light_queue
 from app.routes.auth import _get_authenticated_user_from_cookie
-from app.routes.talks import _cancel_talk_jobs
+from app.routes.talks import _cancel_talk_jobs, attach_room_recording
 from app.security import decode_sso_token
 from app.storage import StorageBackend, get_storage_backend
 from app.tasks import job_waveform
@@ -596,7 +596,7 @@ def get_talk_media_default(
                 path,
                 media_type="video/mp4",
                 filename=download_filename,
-                headers={"Cache-Control": "no-cache"},
+                headers={"Cache-Control": "no-store"},
             )
     raise HTTPException(status_code=404, detail="Media not found")
 
@@ -614,9 +614,28 @@ def get_talk_media_categorized(
     if safe_category not in ALLOWED_MEDIA_CATEGORIES:
         raise HTTPException(status_code=404, detail="Media not found")
 
-    talk = _authorize_studio_talk(
-        talk_id, request, db, not_found_detail="Media not found"
-    )
+    talk = None
+    # Final published media on completed talks is public for agendas and webhook consumers.
+    if safe_category == "final":
+        talk = (
+            db.query(models.Talk)
+            .filter(models.Talk.id == talk_id, models.Talk.status == "done")
+            .first()
+        )
+        if not talk:
+            raw_sso = request.query_params.get("sso_token") or request.cookies.get(
+                "veditor_session"
+            )
+            user = _get_authenticated_user_from_cookie(request, db)
+            client = get_optional_ui_client(request, db)
+            if not raw_sso and not user and not client:
+                raise HTTPException(status_code=404, detail="Media not found")
+
+    # All other categories and non-done states require studio authentication.
+    if not talk:
+        talk = _authorize_studio_talk(
+            talk_id, request, db, not_found_detail="Media not found"
+        )
 
     safe_filename = Path(filename).name
     key = f"{talk_id}/{safe_category}/{safe_filename}"
@@ -630,11 +649,16 @@ def get_talk_media_categorized(
         else None
     )
 
+    is_public_final = (
+        safe_category == "final" and getattr(talk, "status", None) == "done"
+    )
+    cache_control = "no-cache" if is_public_final else "no-store"
+
     return FileResponse(
         path,
         media_type="video/mp4",
         filename=download_filename,
-        headers={"Cache-Control": "no-cache"},
+        headers={"Cache-Control": cache_control},
     )
 
 
@@ -1096,3 +1120,13 @@ def delete_studio_event(
     db.delete(event)
     db.commit()
     return RedirectResponse(url="/studio/events", status_code=status.HTTP_303_SEE_OTHER)
+
+
+router.add_api_route(
+    "/room/attach-recording",
+    attach_room_recording,
+    methods=["POST"],
+    response_model=schemas.RoomRecordingAttachResponse,
+    status_code=status.HTTP_200_OK,
+    include_in_schema=False,
+)

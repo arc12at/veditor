@@ -23,19 +23,26 @@ from typing import Any
 
 import av
 
-from app.config import PREVIEW_PRESETS, settings
+from app.config import PREVIEW_PRESETS, get_setting, settings
 from app.db import SessionLocal
 from app.ingest import validate_media_file
 from app.models import Job, Talk
 from app.pipeline.concat import concat
 from app.pipeline.cut import cut
-from app.pipeline.detect import detect
+from app.pipeline.detect import DETECT_DURATION_TOLERANCE_SECONDS, detect
 from app.pipeline.intro import generate_intro_clip
-from app.pipeline.loudness import normalize
+from app.pipeline.loudness import DEFAULT_TARGET_LUFS, normalize
 from app.pipeline.outro import generate_outro_clip
 from app.pipeline.preview import generate_preview
 from app.pipeline.publish import publish
-from app.pipeline.transcode import transcode
+from app.pipeline.transcode import (
+    # PRESET_4K_MASTER,
+    PRESET_480P,
+    PRESET_720P,
+    PRESET_1080P_DEFAULT,
+    PRESET_1440P,
+    transcode,
+)
 from app.pipeline.waveform import extract_waveform_peaks
 from app.queue import heavy_queue, light_queue
 from app.retention import (
@@ -50,6 +57,15 @@ from app.storage import (
     cleanup_intermediates,
     get_storage_backend,
 )
+
+TRANSCODE_PRESETS = {
+    "480p": PRESET_480P,
+    "720p": PRESET_720P,
+    "1080p_default": PRESET_1080P_DEFAULT,
+    "1440p": PRESET_1440P,
+    # "4k_master": PRESET_4K_MASTER,
+}
+
 
 logger = logging.getLogger(__name__)
 
@@ -215,6 +231,8 @@ def job_detect(
     talk_id: int,
     raw_key: str,
     recording_start: datetime | None = None,
+    *,
+    tolerance_seconds: float | None = None,
 ) -> None:
     job_id = None
     storage = get_storage_backend()
@@ -240,13 +258,26 @@ def job_detect(
             job_id = job.id
             scheduled_start = talk.start
             scheduled_end = talk.end
+            if tolerance_seconds is None:
+                if recording_start is not None:
+                    tolerance_seconds = float("inf")
+                else:
+                    tolerance_seconds = float(
+                        get_setting("detect_duration_tolerance_seconds", 300.0, db=db)
+                    )
 
+        # Omit parameter when default to preserve pipeline default and mock compatibility
+        detect_kwargs = (
+            {"tolerance_seconds": tolerance_seconds}
+            if tolerance_seconds != DETECT_DURATION_TOLERANCE_SECONDS
+            else {}
+        )
         raw_path = storage.get(raw_key)
         result = detect(
             raw_path,
             scheduled_start=scheduled_start,
             scheduled_end=scheduled_end,
-            is_room_recording=recording_start is not None,
+            **detect_kwargs,
         )
         if not result.passed:
             raise ValueError(f"Detection failed: {result.reason}")
@@ -346,12 +377,24 @@ def job_cut(talk_id: int, raw_key: str, cut_key: str | None = None) -> None:
                 if settings.encoder_threads is not None
                 else {}
             )
-            cut(
+            cut_strategy = cut(
                 raw_path,
                 tmp_out,
                 start_seconds,
                 end_seconds,
                 **cut_kwargs,
+            )
+            strat_label = (
+                getattr(cut_strategy, "value", str(cut_strategy))
+                if cut_strategy is not None
+                else "unknown"
+            )
+            logger.info(
+                "Talk %s cut complete using strategy '%s' (bounds: %.2fs - %.2fs)",
+                talk_id,
+                strat_label,
+                start_seconds,
+                end_seconds,
             )
             _cache_waveform(storage, cut_key, tmp_out)
             storage.put(cut_key, tmp_out)
@@ -665,10 +708,16 @@ def job_concat(
             if settings.encoder_threads is not None
             else {}
         )
+        if intro_path or outro_path:
+            logger.info(
+                "Talk %s: intro/outro slates staged; deferring slate stitching to transcode "
+                "to unify encoding into a single pass and avoid duplicate re-encode.",
+                talk_id,
+            )
         concat(
             cut_path=cut_path,
-            intro_path=intro_path,
-            outro_path=outro_path,
+            intro_path=None,
+            outro_path=None,
             output_path=concat_key,
             backend=storage,
             **concat_kwargs,
@@ -725,10 +774,14 @@ def job_preview(talk_id: int, cut_key: str, preview_key: str | None = None) -> N
             db.commit()
             db.refresh(job)
             job_id = job.id
+            preset_name = str(
+                get_setting("default_preview_preset", "small_video", db=db)
+            )
 
         cut_path = storage.get(cut_key)
         preset = (
-            settings.preview_presets.get("small_video")
+            settings.preview_presets.get(preset_name)
+            or PREVIEW_PRESETS.get(preset_name)
             or PREVIEW_PRESETS["small_video"]
         )
 
@@ -781,6 +834,11 @@ def job_preview(talk_id: int, cut_key: str, preview_key: str | None = None) -> N
             job.status = "done"
             job.updated_at = datetime.now(UTC)
             db.commit()
+            db.refresh(talk)
+
+            from app.webhook import dispatch_talk_webhook
+
+            dispatch_talk_webhook("talk.preview_ready", talk, db)
     except Exception as exc:
         _handle_failure(talk_id, job_id, exc, storage)
         raise
@@ -844,13 +902,18 @@ def job_loudness(talk_id: int, cut_key: str, loud_key: str | None = None) -> Non
             db.commit()
             db.refresh(job)
             job_id = job.id
+            target_lufs = float(get_setting("loudness_target_lufs", -16.0, db=db))
 
+        # Omit parameter when default to preserve pipeline default and mock compatibility
+        loud_kwargs = (
+            {"target_lufs": target_lufs} if target_lufs != DEFAULT_TARGET_LUFS else {}
+        )
         cut_path = storage.get(cut_key)
 
         with tempfile.TemporaryDirectory(dir=_get_scratch_dir(storage)) as tmpdir:
             tmp_out = Path(tmpdir) / "loudness.mp4"
             try:
-                normalize(cut_path, tmp_out)
+                normalize(cut_path, tmp_out, **loud_kwargs)
             except ValueError as val_err:
                 if "No audio stream found" in str(val_err):
                     logger.warning(
@@ -926,6 +989,8 @@ def job_transcode(
     loud_key: str,
     final_key: str | None = None,
     progress_throttle_s: float = 5.0,
+    intro_key: str | None = None,
+    outro_key: str | None = None,
 ) -> None:
     final_key = final_key or f"{talk_id}/final/final.mp4"
     job_id = None
@@ -947,8 +1012,37 @@ def job_transcode(
             db.commit()
             db.refresh(job)
             job_id = job.id
+            include_intro = talk.include_intro
+            include_outro = talk.include_outro
+            preset_name = str(
+                get_setting("default_transcode_preset", "1080p_default", db=db)
+            )
 
         loud_path = storage.get(loud_key)
+        transcode_preset = TRANSCODE_PRESETS.get(preset_name, PRESET_1080P_DEFAULT)
+        resolved_intro_key = intro_key
+        if resolved_intro_key is None and include_intro:
+            candidate = f"{talk_id}/intro/intro.mp4"
+            if storage.exists(candidate):
+                resolved_intro_key = candidate
+
+        resolved_outro_key = outro_key
+        if resolved_outro_key is None and include_outro:
+            candidate = f"{talk_id}/outro/outro.mp4"
+            if storage.exists(candidate):
+                resolved_outro_key = candidate
+
+        intro_path = (
+            storage.get(resolved_intro_key)
+            if resolved_intro_key and storage.exists(resolved_intro_key)
+            else None
+        )
+        outro_path = (
+            storage.get(resolved_outro_key)
+            if resolved_outro_key and storage.exists(resolved_outro_key)
+            else None
+        )
+        target_lufs = None if "_loud" in loud_key else -16.0
         last_update_time = [0.0]
 
         def _on_progress(pct: float) -> None:
@@ -968,16 +1062,20 @@ def job_transcode(
                         progress_err,
                     )
 
+        transcode_kwargs: dict[str, Any] = {}
+        if preset_name != "1080p_default":
+            transcode_kwargs["preset"] = transcode_preset
+        if settings.encoder_threads is not None:
+            transcode_kwargs["threads"] = settings.encoder_threads
+
         with tempfile.TemporaryDirectory(dir=_get_scratch_dir(storage)) as tmpdir:
             tmp_out = Path(tmpdir) / "final.mp4"
-            transcode_kwargs = (
-                {"threads": settings.encoder_threads}
-                if settings.encoder_threads is not None
-                else {}
-            )
             transcode(
                 loud_path,
                 tmp_out,
+                intro_path=intro_path,
+                outro_path=outro_path,
+                target_lufs=target_lufs,
                 on_progress=_on_progress,
                 **transcode_kwargs,
             )
@@ -1040,6 +1138,19 @@ def job_publish(talk_id: int, final_key: str) -> None:
         final_path = storage.get(final_key)
         publish(final_path, talk_id=talk_id, backend=storage)
 
+        duration_seconds: float | None = None
+        try:
+            import av
+
+            from app.pipeline.detect import container_duration_seconds
+
+            with av.open(str(final_path)) as container:
+                duration_seconds = container_duration_seconds(container)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(
+                "Could not probe container duration for %s: %s", final_path, exc
+            )
+
         with SessionLocal() as db:
             talk = db.get(Talk, talk_id)
             job = db.get(Job, job_id)
@@ -1058,6 +1169,38 @@ def job_publish(talk_id: int, final_key: str) -> None:
             job.status = "done"
             job.updated_at = datetime.now(UTC)
             db.commit()
+            db.refresh(talk)
+
+            if duration_seconds is None or duration_seconds <= 0:
+                if talk.cut_start is not None and talk.cut_end is not None:
+                    duration_seconds = max(0.0, talk.cut_end - talk.cut_start)
+                elif talk.raw_duration_seconds is not None:
+                    duration_seconds = talk.raw_duration_seconds
+                else:
+                    duration_seconds = 0.0
+            else:
+                duration_seconds = round(float(duration_seconds), 2)
+
+            if not settings.base_url:
+                logger.warning(
+                    "settings.base_url is not configured; published video_url in webhook payload will be a relative path."
+                )
+
+            base = settings.base_url.rstrip("/") if settings.base_url else ""
+            filename = Path(final_key).name
+            video_url = f"{base}/studio/media/{talk.id}/final/{filename}"
+
+            from app.webhook import dispatch_talk_webhook
+
+            dispatch_talk_webhook(
+                "talk.published",
+                talk,
+                db,
+                extra_payload={
+                    "video_url": video_url,
+                    "duration_seconds": duration_seconds,
+                },
+            )
 
         cleanup_intermediates(storage, talk_id)
     except Exception as exc:

@@ -233,6 +233,7 @@ def job_detect(
     recording_start: datetime | None = None,
     *,
     tolerance_seconds: float | None = None,
+    is_room_recording: bool = False,
 ) -> None:
     job_id = None
     storage = get_storage_backend()
@@ -259,7 +260,7 @@ def job_detect(
             scheduled_start = talk.start
             scheduled_end = talk.end
             if tolerance_seconds is None:
-                if recording_start is not None:
+                if is_room_recording:
                     tolerance_seconds = float("inf")
                 else:
                     tolerance_seconds = float(
@@ -272,6 +273,8 @@ def job_detect(
             if tolerance_seconds != DETECT_DURATION_TOLERANCE_SECONDS
             else {}
         )
+        if is_room_recording:
+            detect_kwargs["is_room_recording"] = True
         raw_path = storage.get(raw_key)
         result = detect(
             raw_path,

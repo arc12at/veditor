@@ -1377,6 +1377,71 @@ def test_job_detect_room_recording_tolerance_override(dummy_talk, mock_storage):
         assert dummy_talk.raw_duration_seconds == 12600.0
 
 
+def test_job_detect_recording_start_alone_retains_configured_tolerance(
+    dummy_talk, mock_storage
+):
+    """A timestamp alone (recording_start) must NOT set infinite tolerance for ordinary recordings."""
+    dummy_talk.status = "detecting"
+    jobs = {}
+    db_ctx = MockDBContext(dummy_talk, jobs)
+
+    with (
+        patch("app.tasks.SessionLocal", side_effect=db_ctx),
+        patch("app.tasks.get_storage_backend", return_value=mock_storage),
+        patch("app.tasks.detect") as mock_detect,
+    ):
+        mock_detect.return_value = DetectResult(
+            passed=True,
+            actual_duration_seconds=1800.0,
+            has_video=True,
+            has_audio=True,
+            reason=None,
+        )
+        rec_start = datetime(2026, 8, 29, 9, 0, tzinfo=UTC)
+        job_detect(1, "1/raw/raw.mp4", recording_start=rec_start)
+
+        # Configured default tolerance (300.0) is retained, not inf
+        mock_detect.assert_called_once_with(
+            mock_storage.get("1/raw/raw.mp4"),
+            scheduled_start=dummy_talk.start,
+            scheduled_end=dummy_talk.end,
+        )
+
+
+def test_job_detect_confirmed_room_recording_bypasses_duration(
+    dummy_talk, mock_storage
+):
+    """When is_room_recording=True, infinite tolerance is applied and forwarded."""
+    dummy_talk.status = "detecting"
+    jobs = {}
+    db_ctx = MockDBContext(dummy_talk, jobs)
+
+    with (
+        patch("app.tasks.SessionLocal", side_effect=db_ctx),
+        patch("app.tasks.get_storage_backend", return_value=mock_storage),
+        patch("app.tasks.detect") as mock_detect,
+    ):
+        mock_detect.return_value = DetectResult(
+            passed=True,
+            actual_duration_seconds=12600.0,
+            has_video=True,
+            has_audio=True,
+            reason=None,
+        )
+        rec_start = datetime(2026, 8, 29, 9, 0, tzinfo=UTC)
+        job_detect(
+            1, "1/raw/raw.mp4", recording_start=rec_start, is_room_recording=True
+        )
+
+        mock_detect.assert_called_once_with(
+            mock_storage.get("1/raw/raw.mp4"),
+            scheduled_start=dummy_talk.start,
+            scheduled_end=dummy_talk.end,
+            tolerance_seconds=float("inf"),
+            is_room_recording=True,
+        )
+
+
 def test_unified_transcode_resolves_staged_slates_and_bypasses_concat_reencode(
     dummy_talk, mock_storage
 ):

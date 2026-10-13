@@ -78,10 +78,14 @@ document.addEventListener('DOMContentLoaded', () => {
       const action = btn.getAttribute('data-action');
 
       if (action === 'deactivate') {
-        const confirmed = confirm(
-          'Are you sure you want to deactivate this account? ' +
-          'The user will be immediately logged out and prevented from signing in.'
-        );
+        const confirmed = await Modal.confirm({
+          title: 'Deactivate Account',
+          message:
+            'Are you sure you want to deactivate this account? ' +
+            'The user will be immediately logged out and prevented from signing in.',
+          confirmText: 'Deactivate',
+          variant: 'danger'
+        });
         if (!confirmed) return;
       }
 

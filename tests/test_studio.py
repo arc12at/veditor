@@ -927,19 +927,104 @@ def test_dashboard_and_studio_render_active_job_progress(
     db_session.add(job)
     db_session.commit()
 
-    # 1. Dashboard should render the progress percentage badge and track
+    # 1. Dashboard STATUS column should render clean status badge without progress bar or percentage
     dash_res = client.get("/studio", headers={"X-API-Key": api_key})
     assert dash_res.status_code == 200
-    assert "72%" in dash_res.text
-    assert "job-progress-fill" in dash_res.text
+    assert "badge badge-processing" in dash_res.text
+    assert "Transcoding" in dash_res.text
+    assert "job-progress-col" not in dash_res.text
+    assert "72%" not in dash_res.text
 
-    # 2. Studio should render the pipeline progress and milestones stepper without job cards
+    # 2. Studio player viewport should render the prominent loader screen with progress bar & stage info
     studio_res = client.get(f"/studio/talks/{talk.id}", headers={"X-API-Key": api_key})
     assert studio_res.status_code == 200
-    assert "pipeline-progress-wrap" in studio_res.text
+    assert "studio-viewport-loader" in studio_res.text
+    assert "is-processing" in studio_res.text
+    assert "Transcoding Broadcast Master" in studio_res.text
+    assert "72%" in studio_res.text
+    assert "viewport-loader-desc" not in studio_res.text
     assert "stepper-timeline" in studio_res.text
     assert "Recent Jobs" not in studio_res.text
     assert "job-card" not in studio_res.text
+
+
+def test_studio_viewport_loader_states_and_dashboard_clean_status(
+    client: TestClient, db_session
+):
+    event = models.Event(name=f"Loader Event {uuid.uuid4().hex}")
+    db_session.add(event)
+    db_session.commit()
+    db_session.refresh(event)
+
+    api_key = f"key_{uuid.uuid4().hex}"
+    client_model = models.Client(hashed_key=hash_api_key(api_key), event_ids=[event.id])
+    db_session.add(client_model)
+    db_session.commit()
+
+    now = datetime.now(tz=UTC)
+    # Test cutting state
+    talk_cut = models.Talk(
+        event_id=event.id,
+        title="Cutting Stage Talk",
+        room="Room 101",
+        start=now,
+        end=now + timedelta(minutes=30),
+        status="cutting",
+    )
+    db_session.add(talk_cut)
+    db_session.commit()
+    db_session.refresh(talk_cut)
+
+    job_cut = models.Job(
+        talk_id=talk_cut.id,
+        kind="cut",
+        status="running",
+        progress_pct=45.0,
+        started_at=now - timedelta(seconds=10),
+        updated_at=now,
+    )
+    db_session.add(job_cut)
+    db_session.commit()
+
+    # Studio should render loader with cutting stage title, progress pct, and timing
+    res = client.get(f"/studio/talks/{talk_cut.id}", headers={"X-API-Key": api_key})
+    assert res.status_code == 200
+    assert "player-viewport-loader" in res.text
+    assert "is-active" in res.text
+    assert 'role="status"' in res.text
+    assert 'aria-label="Video processing status"' in res.text
+    assert '<span class="spinner spinner-lg" aria-hidden="true"></span>' in res.text
+    assert "Cutting Recording Bounds" in res.text
+    assert "viewport-loader-desc" not in res.text
+    assert "45%" in res.text
+    assert "seconds remaining" in res.text or "seconds elapsed" in res.text
+
+    # Dashboard should render Cutting badge without progress track
+    dash_res = client.get("/studio", headers={"X-API-Key": api_key})
+    assert dash_res.status_code == 200
+    assert "badge badge-processing" in dash_res.text
+    assert "Cutting" in dash_res.text
+    assert "job-progress-col" not in dash_res.text
+
+    # Non-processing talk (preview) should NOT have is-processing class on player-panel
+    talk_preview = models.Talk(
+        event_id=event.id,
+        title="Preview Ready Talk",
+        room="Room 102",
+        start=now,
+        end=now + timedelta(minutes=30),
+        status="preview",
+    )
+    db_session.add(talk_preview)
+    db_session.commit()
+    db_session.refresh(talk_preview)
+
+    prev_res = client.get(
+        f"/studio/talks/{talk_preview.id}", headers={"X-API-Key": api_key}
+    )
+    assert prev_res.status_code == 200
+    assert 'class="player-panel is-processing"' not in prev_res.text
+    assert "player-viewport-loader is-active" not in prev_res.text
 
 
 def test_import_schedule_mm_ss_duration(client: TestClient, db_session):
@@ -3402,3 +3487,169 @@ def test_attach_room_recording_enqueue_failure_marks_talks_broken(
     finally:
         app.dependency_overrides.pop(get_current_user, None)
         clip.unlink(missing_ok=True)
+
+
+def test_sso_organizer_management_controls_visible(client, db_session):
+    """Verify organizers arriving via SSO have full access to management buttons while speakers do not."""
+    import uuid
+
+    from app.security import create_sso_token
+
+    event = models.Event(name=f"SSO Org Event {uuid.uuid4().hex}")
+    db_session.add(event)
+    db_session.commit()
+    db_session.refresh(event)
+
+    from datetime import UTC, datetime, timedelta
+
+    now_utc = datetime.now(UTC)
+    talk = models.Talk(
+        event_id=event.id,
+        title="Keynote Session",
+        speaker_email="speaker.sso@example.com",
+        status="waiting_for_files",
+        room="Auditorium A",
+        start=now_utc,
+        end=now_utc + timedelta(minutes=30),
+    )
+    db_session.add(talk)
+    db_session.commit()
+    db_session.refresh(talk)
+
+    # 1. Organizer via SSO
+    org_token = create_sso_token(
+        scope_type="event", scope_id=event.id, role="organizer"
+    )
+    client.cookies.set("veditor_session", org_token)
+
+    res_org_dash = client.get(f"/studio?event_id={event.id}")
+    assert res_org_dash.status_code == 200
+    assert 'id="btn-open-room-attach"' in res_org_dash.text
+    assert 'id="modal-attach-room"' in res_org_dash.text
+    assert 'id="btn-open-import"' not in res_org_dash.text
+    assert 'id="btn-open-quick-talk"' not in res_org_dash.text
+
+    res_org_studio = client.get(f"/studio/talks/{talk.id}")
+    assert res_org_studio.status_code == 200
+    assert 'id="btn-edit-talk-studio"' not in res_org_studio.text
+    assert 'id="modal-edit-talk-studio"' not in res_org_studio.text
+
+    # 2. Speaker via SSO
+    spk_token = create_sso_token(
+        scope_type="event",
+        scope_id=event.id,
+        role="speaker",
+        email="speaker.sso@example.com",
+    )
+    client.cookies.set("veditor_session", spk_token)
+
+    res_spk_dash = client.get(f"/studio?event_id={event.id}")
+    assert res_spk_dash.status_code == 200
+    assert 'id="btn-open-room-attach"' not in res_spk_dash.text
+    assert 'id="btn-open-import"' not in res_spk_dash.text
+    assert 'id="btn-open-quick-talk"' not in res_spk_dash.text
+    assert 'id="modal-attach-room"' not in res_spk_dash.text
+
+    res_spk_studio = client.get(f"/studio/talks/{talk.id}")
+    assert res_spk_studio.status_code == 200
+    assert 'id="btn-edit-talk-studio"' not in res_spk_studio.text
+    assert 'id="modal-edit-talk-studio"' not in res_spk_studio.text
+
+
+def test_talk_studio_organizer_request_prompt(client: TestClient, db_session):
+    """Standard user sees organizer request banner and modal in Studio; SSO and organizer do not."""
+    user = models.User(
+        email=f"std_user_{uuid.uuid4().hex[:8]}@example.com",
+        hashed_password="hash",
+        role="user",
+        organizer_requested=False,
+    )
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+
+    event = models.Event(name=f"Event {uuid.uuid4().hex}", created_by_user_id=user.id)
+    db_session.add(event)
+    db_session.commit()
+    db_session.refresh(event)
+
+    now = datetime.now(tz=UTC)
+    talk = models.Talk(
+        event_id=event.id,
+        title="Studio Role Request Talk",
+        room="Room B",
+        start=now,
+        end=now + timedelta(minutes=30),
+        status="preview",
+    )
+    db_session.add(talk)
+    db_session.commit()
+    db_session.refresh(talk)
+
+    # 1. Standard user without pending request sees request banner & modal
+    token = create_session_token(user.id, user.role)
+    client.cookies.set("veditor_session", token)
+    res = client.get(f"/studio/talks/{talk.id}")
+    assert res.status_code == 200
+    assert "btn-request-organizer" in res.text
+    assert "modal-request-organizer" in res.text
+    assert "Request Organizer Role" in res.text
+    assert "Organizer Privileges Required" in res.text
+
+    # 2. Standard user with pending request sees pending banner
+    user.organizer_requested = True
+    db_session.commit()
+    res_pending = client.get(f"/studio/talks/{talk.id}")
+    assert res_pending.status_code == 200
+    assert "role-request-pending" in res_pending.text
+    assert "pending administrator review" in res_pending.text
+    assert "Organizer Request Pending Review" in res_pending.text
+    assert "btn-request-organizer" not in res_pending.text
+
+    # 3. Organizer user does not see organizer request prompt
+    org = models.User(
+        email=f"org_user_{uuid.uuid4().hex[:8]}@example.com",
+        hashed_password="hash",
+        role="organizer",
+    )
+    db_session.add(org)
+    db_session.commit()
+    db_session.refresh(org)
+
+    event_org = models.Event(
+        name=f"Org Event {uuid.uuid4().hex}", created_by_user_id=org.id
+    )
+    db_session.add(event_org)
+    db_session.commit()
+    db_session.refresh(event_org)
+
+    talk_org = models.Talk(
+        event_id=event_org.id,
+        title="Org Talk",
+        room="Main",
+        start=now,
+        end=now + timedelta(minutes=30),
+        status="preview",
+    )
+    db_session.add(talk_org)
+    db_session.commit()
+    db_session.refresh(talk_org)
+
+    org_token = create_session_token(org.id, org.role)
+    client.cookies.set("veditor_session", org_token)
+    res_org = client.get(f"/studio/talks/{talk_org.id}")
+    assert res_org.status_code == 200
+    assert "btn-request-organizer" not in res_org.text
+    assert "modal-request-organizer" not in res_org.text
+
+    # 4. SSO user does not see organizer request prompt
+    from app.security import create_sso_token
+
+    sso_token = create_sso_token(
+        scope_type="event", scope_id=event_org.id, role="organizer"
+    )
+    client.cookies.set("veditor_session", sso_token)
+    res_sso = client.get(f"/studio/talks/{talk_org.id}")
+    assert res_sso.status_code == 200
+    assert "btn-request-organizer" not in res_sso.text
+    assert "modal-request-organizer" not in res_sso.text

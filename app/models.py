@@ -71,6 +71,31 @@ class User(Base):
         server_default=text("true"),
         nullable=False,
     )
+    is_verified: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default=text("false"),
+        nullable=False,
+    )
+    verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        default=None,
+    )
+    organizer_requested: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default=text("false"),
+        nullable=False,
+    )
+    organizer_request_note: Mapped[str | None] = mapped_column(
+        String(1000),
+        nullable=True,
+    )
+    organizer_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -84,9 +109,20 @@ class User(Base):
         onupdate=func.now(),
         nullable=False,
     )
+    session_revoked_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=text("'1970-01-01 00:00:00+00'"),
+        default=lambda: datetime.fromtimestamp(0, UTC),
+        nullable=False,
+    )
 
     events: Mapped[list[Event]] = relationship(back_populates="created_by_user")
     reviews: Mapped[list[Review]] = relationship(back_populates="user")
+
+    def __init__(self, **kwargs: Any) -> None:
+        if "session_revoked_at" not in kwargs:
+            kwargs["session_revoked_at"] = datetime.fromtimestamp(0, UTC)
+        super().__init__(**kwargs)
 
 
 class Event(Base):

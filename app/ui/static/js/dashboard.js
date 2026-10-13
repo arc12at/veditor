@@ -7,78 +7,32 @@ const ACTIVE_STATUSES = new Set([
 ]);
 
 const STATUS_BADGE_MAP = {
-  waiting_for_files:   '<span class="badge badge-gray"><span class="badge-dot"></span>Waiting</span>',
-  detecting:           '<span class="badge badge-amber badge-pulse"><span class="badge-dot"></span>Detecting</span>',
-  approval_pending:    '<span class="badge badge-orange badge-pulse"><span class="badge-dot"></span>Pending Review</span>',
-  pending_approval:    '<span class="badge badge-orange badge-pulse"><span class="badge-dot"></span>Pending Review</span>',
-  pending_intro_outro: '<span class="badge badge-orange badge-pulse"><span class="badge-dot"></span>Pending Bumpers</span>',
-  pending_bounds:      '<span class="badge badge-orange badge-pulse"><span class="badge-dot"></span>Pending Bounds</span>',
-  needs_work:          '<span class="badge badge-orange badge-pulse"><span class="badge-dot"></span>Needs Work</span>',
-  cutting:             '<span class="badge badge-blue badge-pulse"><span class="badge-dot"></span>Cutting</span>',
-  generating_previews: '<span class="badge badge-blue badge-pulse"><span class="badge-dot"></span>Generating Previews</span>',
-  normalizing:         '<span class="badge badge-blue badge-pulse"><span class="badge-dot"></span>Normalizing</span>',
-  assembling:          '<span class="badge badge-blue badge-pulse"><span class="badge-dot"></span>Assembling</span>',
-  rendering:           '<span class="badge badge-blue badge-pulse"><span class="badge-dot"></span>Rendering</span>',
-  transcoding:         '<span class="badge badge-blue badge-pulse"><span class="badge-dot"></span>Transcoding</span>',
-  uploading:           '<span class="badge badge-blue badge-pulse"><span class="badge-dot"></span>Uploading</span>',
-  preview:             '<span class="badge badge-teal"><span class="badge-dot"></span>Preview Ready</span>',
-  publishing:          '<span class="badge badge-purple badge-pulse"><span class="badge-dot"></span>Publishing</span>',
-  done:                '<span class="badge badge-green"><span class="badge-dot"></span>Done</span>',
-  rejected:            '<span class="badge badge-red"><span class="badge-dot"></span>Rejected</span>',
-  failed:              '<span class="badge badge-red"><span class="badge-dot"></span>Failed</span>',
-  broken:              '<span class="badge badge-red"><span class="badge-dot"></span>Broken</span>',
+  waiting_for_files:   '<span class="badge badge-waiting"><span class="badge-dot"></span>Waiting for files</span>',
+  detecting:           '<span class="badge badge-processing"><span class="spinner spinner-sm"></span>Detecting</span>',
+  approval_pending:    '<span class="badge badge-pending"><span class="badge-dot"></span>Pending Review</span>',
+  pending_approval:    '<span class="badge badge-pending"><span class="badge-dot"></span>Pending Review</span>',
+  pending_intro_outro: '<span class="badge badge-pending"><span class="badge-dot"></span>Pending Bumpers</span>',
+  pending_bounds:      '<span class="badge badge-pending"><span class="badge-dot"></span>Pending Bounds</span>',
+  needs_work:          '<span class="badge badge-pending"><span class="badge-dot"></span>Needs Work</span>',
+  cutting:             '<span class="badge badge-processing"><span class="spinner spinner-sm"></span>Cutting</span>',
+  generating_previews: '<span class="badge badge-processing"><span class="spinner spinner-sm"></span>Generating Previews</span>',
+  normalizing:         '<span class="badge badge-processing"><span class="spinner spinner-sm"></span>Normalizing</span>',
+  assembling:          '<span class="badge badge-processing"><span class="spinner spinner-sm"></span>Assembling</span>',
+  rendering:           '<span class="badge badge-processing"><span class="spinner spinner-sm"></span>Rendering</span>',
+  transcoding:         '<span class="badge badge-processing"><span class="spinner spinner-sm"></span>Transcoding</span>',
+  uploading:           '<span class="badge badge-processing"><span class="spinner spinner-sm"></span>Uploading</span>',
+  preview:             '<span class="badge badge-preview"><span class="badge-dot"></span>Preview Ready</span>',
+  publishing:          '<span class="badge badge-processing"><span class="spinner spinner-sm"></span>Publishing</span>',
+  done:                '<span class="badge badge-done"><span class="badge-dot"></span>Published</span>',
+  rejected:            '<span class="badge badge-danger"><span class="badge-dot"></span>Rejected</span>',
+  failed:              '<span class="badge badge-danger"><span class="badge-dot"></span>Failed</span>',
+  broken:              '<span class="badge badge-danger"><span class="badge-dot"></span>Broken</span>',
 };
 
 function getActiveTalkIds() {
   return [...document.querySelectorAll('tr[data-talk-id]')]
     .filter(row => ACTIVE_STATUSES.has(row.dataset.status))
     .map(row => parseInt(row.dataset.talkId, 10));
-}
-
-function renderActiveJobCell(cell, statusText, pct, remainingStr) {
-  cell.textContent = '';
-
-  const container = document.createElement('div');
-  container.style.cssText = 'display:flex;flex-direction:column;gap:3px;min-width:110px;';
-
-  const headerDiv = document.createElement('div');
-  headerDiv.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:4px;';
-
-  const statusBadge = document.createElement('span');
-  statusBadge.className = 'badge badge-blue badge-pulse';
-  const dot = document.createElement('span');
-  dot.className = 'badge-dot';
-  statusBadge.appendChild(dot);
-  statusBadge.appendChild(document.createTextNode((statusText || 'processing').replace(/_/g, ' ')));
-
-  const pctBadge = document.createElement('span');
-  pctBadge.className = 'badge badge-info';
-  pctBadge.style.cssText = 'font-size:0.65rem;padding:1px 4px;';
-  pctBadge.textContent = `${pct}%`;
-
-  headerDiv.appendChild(statusBadge);
-  headerDiv.appendChild(pctBadge);
-
-  const trackDiv = document.createElement('div');
-  trackDiv.className = 'job-progress-track';
-  trackDiv.style.cssText = 'height:3px;margin:0;';
-
-  const fillDiv = document.createElement('div');
-  fillDiv.className = 'job-progress-fill animated';
-  fillDiv.style.width = `${Math.min(100, Math.max(0, pct))}%`;
-  trackDiv.appendChild(fillDiv);
-
-  container.appendChild(headerDiv);
-  container.appendChild(trackDiv);
-
-  if (remainingStr) {
-    const remSpan = document.createElement('span');
-    remSpan.style.cssText = 'font-size:0.65rem;color:var(--v-text-muted);font-variant-numeric:tabular-nums;';
-    remSpan.textContent = remainingStr;
-    container.appendChild(remSpan);
-  }
-
-  cell.appendChild(container);
 }
 
 async function pollTalk(talkId) {
@@ -94,25 +48,15 @@ async function pollTalk(talkId) {
     if (!cell) return;
 
     let talkStatus = row ? row.dataset.status : '';
-    let jobs = [];
 
     const headers = key ? { 'X-API-Key': key } : {};
     const r = await (window.authFetch || fetch)(`/talks/${talkId}/jobs`, { headers, _isPolling: true });
     if (!r.ok) return;
     const data = await r.json();
     talkStatus = data.status || talkStatus;
-    jobs = data.jobs || (Array.isArray(data) ? data : []);
 
-    const activeJob = jobs.findLast ? jobs.findLast(j => j.status === 'running') : [...jobs].reverse().find(j => j.status === 'running');
-    if (activeJob && activeJob.progress_pct !== null && activeJob.progress_pct !== undefined) {
-      const pct = Math.round(activeJob.progress_pct);
-      const remainingStr = (activeJob.estimated_remaining !== null && activeJob.estimated_remaining !== undefined)
-        ? `~${Math.round(activeJob.estimated_remaining)}s left`
-        : (activeJob.elapsed_time !== null && activeJob.elapsed_time !== undefined ? `${Math.round(activeJob.elapsed_time)}s elapsed` : '');
-
-      renderActiveJobCell(cell, talkStatus || activeJob.kind, pct, remainingStr);
-    } else if (talkStatus) {
-      const newBadge = STATUS_BADGE_MAP[talkStatus] ?? STATUS_BADGE_MAP.waiting_for_files;
+    if (talkStatus) {
+      const newBadge = STATUS_BADGE_MAP[talkStatus] ?? `<span class="badge badge-waiting"><span class="badge-dot"></span>${talkStatus}</span>`;
       cell.innerHTML = newBadge;
     }
 
@@ -698,3 +642,132 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 });
 
+
+// ---------------------------------------------------------------------------
+// Organizer Role Request Flow
+// ---------------------------------------------------------------------------
+(function initOrganizerRequest() {
+  const btnRequest = document.getElementById('btn-request-organizer');
+  const modal      = document.getElementById('modal-request-organizer');
+  const btnClose   = document.getElementById('btn-close-request-organizer');
+  const btnCancel  = document.getElementById('btn-cancel-request-organizer');
+  const btnSubmit  = document.getElementById('btn-submit-request-organizer');
+  const noteInput  = document.getElementById('organizer-request-note');
+  const noteChars  = document.getElementById('organizer-request-note-chars');
+  const errorEl    = document.getElementById('organizer-request-error');
+  const banner     = document.getElementById('role-request-banner');
+
+  if (!btnRequest || !modal) return;
+
+  function openModal() {
+    if (noteInput) noteInput.value = '';
+    if (noteChars) noteChars.textContent = '0 / 500';
+    if (errorEl) { errorEl.textContent = ''; errorEl.classList.add('hidden'); }
+    modal.classList.remove('hidden');
+    if (noteInput) noteInput.focus();
+  }
+
+  function closeModal() {
+    modal.classList.add('hidden');
+    if (btnRequest) btnRequest.focus();
+  }
+
+  btnRequest.addEventListener('click', openModal);
+  if (btnClose) btnClose.addEventListener('click', closeModal);
+  if (btnCancel) btnCancel.addEventListener('click', closeModal);
+  modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+
+  modal.addEventListener('keydown', (e) => {
+    if (modal.classList.contains('hidden')) return;
+
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeModal();
+      return;
+    }
+
+    if (e.key === 'Tab') {
+      const focusable = modal.querySelectorAll(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+      );
+      const focusableEls = Array.from(focusable).filter(
+        (el) => !el.disabled && el.offsetParent !== null
+      );
+      if (!focusableEls.length) return;
+
+      const firstEl = focusableEls[0];
+      const lastEl = focusableEls[focusableEls.length - 1];
+
+      if (e.shiftKey) {
+        if (document.activeElement === firstEl) {
+          e.preventDefault();
+          lastEl.focus();
+        }
+      } else {
+        if (document.activeElement === lastEl) {
+          e.preventDefault();
+          firstEl.focus();
+        }
+      }
+    }
+  });
+
+  if (noteInput && noteChars) {
+    noteInput.addEventListener('input', () => {
+      noteChars.textContent = `${noteInput.value.length} / 500`;
+    });
+  }
+
+  if (btnSubmit) {
+    btnSubmit.addEventListener('click', async () => {
+      if (errorEl) { errorEl.textContent = ''; errorEl.classList.add('hidden'); }
+      btnSubmit.disabled = true;
+      btnSubmit.textContent = 'Submitting\u2026';
+      try {
+        const resp = await fetch('/users/request-organizer', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ note: noteInput ? noteInput.value.trim() : '' }),
+        });
+        let data = {};
+        try {
+          data = await resp.json();
+        } catch (_) {
+          data = {};
+        }
+        if (resp.ok) {
+          closeModal();
+          if (banner) {
+            banner.classList.add('role-request-pending');
+            banner.innerHTML = `
+              <div class="role-request-icon-wrap" aria-hidden="true">
+                <svg class="role-request-hero-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="10"></circle>
+                  <polyline points="12 6 12 12 16 14"></polyline>
+                </svg>
+              </div>
+              <div class="role-request-body">
+                <div class="role-request-title-row">
+                  <h3 class="role-request-title">Organizer Request Pending Review</h3>
+                  <span class="role-request-badge">Pending</span>
+                </div>
+                <p class="role-request-description">Your request for organizer access has been submitted and is pending administrator review.</p>
+              </div>
+            `;
+          }
+        } else {
+          const msg = (typeof data.detail === 'string' && data.detail.trim())
+            ? data.detail
+            : 'Failed to submit request. Please try again.';
+          if (errorEl) { errorEl.textContent = msg; errorEl.classList.remove('hidden'); }
+          btnSubmit.disabled = false;
+          btnSubmit.textContent = 'Submit Request';
+        }
+      } catch (_err) {
+        if (errorEl) { errorEl.textContent = 'Network error. Please try again.'; errorEl.classList.remove('hidden'); }
+        btnSubmit.disabled = false;
+        btnSubmit.textContent = 'Submit Request';
+      }
+    });
+  }
+})();

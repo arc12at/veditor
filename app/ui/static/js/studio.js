@@ -259,9 +259,108 @@ function initWaveformListeners() {
   }
 }
 
+// ── Background Processing States & Viewport Loader ───────────────
+const ACTIVE_PROCESSING_STATES = [
+  'detecting', 'cutting', 'generating_previews', 'assembling', 'transcoding', 'uploading'
+];
+
+const STAGE_TITLES = {
+  detecting: 'Detecting Recording Metadata',
+  cutting: 'Cutting Recording Bounds',
+  generating_previews: 'Generating Preview Video',
+  assembling: 'Assembling Talk Media',
+  transcoding: 'Transcoding Broadcast Master',
+  uploading: 'Publishing & Uploading Media',
+};
+
+const JOB_KIND_TITLES = {
+  detect: 'Detecting Recording Metadata',
+  ingest: 'Ingesting Video Recording',
+  cut: 'Cutting Recording Bounds',
+  preview: 'Generating Preview Video',
+  loudness: 'Normalizing Audio Loudness',
+  intro: 'Generating Intro Bumper',
+  outro: 'Generating Outro Bumper',
+  concat: 'Concatenating Video Segments',
+  assembly: 'Assembling Talk Media',
+  transcode: 'Transcoding Broadcast Master',
+  publish: 'Publishing & Uploading Media',
+};
+
+function updateStudioLoader(talkStatus, activeJob) {
+  const panel = document.getElementById('player-panel');
+  const loader = document.getElementById('studio-viewport-loader');
+  if (!loader) return;
+
+  const isProc = ACTIVE_PROCESSING_STATES.includes(talkStatus);
+  if (isProc) {
+    if (panel) panel.classList.add('is-processing');
+    loader.classList.add('is-active');
+    if (video) {
+      video.pause();
+      video.style.display = 'none';
+    }
+  } else {
+    if (panel) panel.classList.remove('is-processing');
+    loader.classList.remove('is-active');
+    if (video && video.src) {
+      video.style.display = 'block';
+    }
+    return;
+  }
+
+  const title = (activeJob && JOB_KIND_TITLES[activeJob.kind]) ||
+    STAGE_TITLES[talkStatus] ||
+    'Processing Video Pipeline';
+
+  const titleEl = document.getElementById('viewport-loader-title');
+  const statusLabel = document.getElementById('viewport-loader-status-label');
+  const pctBadge = document.getElementById('viewport-loader-pct');
+  const fill = document.getElementById('viewport-loader-fill');
+  const timingEl = document.getElementById('viewport-loader-timing');
+
+  if (titleEl) titleEl.textContent = title;
+  if (statusLabel) statusLabel.textContent = (talkStatus || (activeJob && activeJob.kind) || 'Processing').replace(/_/g, ' ');
+
+  if (activeJob) {
+    const pct = (activeJob.progress_pct !== null && activeJob.progress_pct !== undefined)
+      ? Math.round(activeJob.progress_pct)
+      : 0;
+
+    if (pctBadge) pctBadge.textContent = `${pct}%`;
+    if (fill) fill.style.width = `${Math.min(100, Math.max(0, pct))}%`;
+
+    if (timingEl) {
+      if (activeJob.estimated_remaining !== null && activeJob.estimated_remaining !== undefined && activeJob.estimated_remaining > 0) {
+        timingEl.textContent = `~${Math.round(activeJob.estimated_remaining)} seconds remaining`;
+      } else if (activeJob.elapsed_time !== null && activeJob.elapsed_time !== undefined) {
+        timingEl.textContent = `${Math.round(activeJob.elapsed_time)} seconds elapsed`;
+      } else {
+        timingEl.textContent = '';
+      }
+    }
+  }
+}
+
+let pendingApprovalStage = null;
+
+function showStudioLoader(stageOrStatus) {
+  pendingApprovalStage = stageOrStatus || getTalkStatus();
+  const panel = document.getElementById('player-panel');
+  const loader = document.getElementById('studio-viewport-loader');
+  if (panel) panel.classList.add('is-processing');
+  if (loader) loader.classList.add('is-active');
+  if (video) {
+    video.pause();
+    video.style.display = 'none';
+  }
+  updateStudioLoader(pendingApprovalStage, { progress_pct: 0 });
+}
+
 // ── Video Loading ───────────────────────────────────────────────
 window.loadVideoSrc = function(url) {
   if (!video) return;
+  if (ACTIVE_PROCESSING_STATES.includes(getTalkStatus())) return;
   video.pause();
   boundsEdited = false;
   video.src = url;
@@ -283,6 +382,15 @@ window.loadVideoSrc = function(url) {
 };
 
 function initInitialVideo() {
+  const currentTalkStatus = getTalkStatus();
+  if (ACTIVE_PROCESSING_STATES.includes(currentTalkStatus)) {
+    if (video) {
+      video.pause();
+      video.style.display = 'none';
+    }
+    updateStudioLoader(currentTalkStatus);
+    return;
+  }
   const sourceSelect = document.getElementById('media-source-select');
   if (sourceSelect && sourceSelect.value) {
     window.loadVideoSrc(sourceSelect.value);
@@ -556,6 +664,10 @@ if (video) {
     } else if (outPointSec <= 0 || outPointSec > duration) {
       outPointSec = duration;
     }
+    // Seek playhead to pre-seeded inPoint so the speaker sees their talk start, not 00:00.
+    if (!boundsEdited && inPointSec > 0 && video.duration > inPointSec) {
+      video.currentTime = inPointSec;
+    }
     updateTimecode();
     updateTimelineTicks();
     updateCutMarkersUI();
@@ -667,6 +779,9 @@ window.approveTalk = async function(id) {
 
   setBtnBusy(btn, true, 'Processing...');
 
+  const targetStage = talkStatus === 'preview' ? 'transcoding' : (talkStatus === 'pending_bounds' || talkStatus === 'needs_work' ? 'cutting' : (talkStatus === 'pending_intro_outro' ? 'assembling' : talkStatus));
+  showStudioLoader(targetStage);
+
   const progressWrap = document.getElementById('pipeline-progress-wrap');
   const progressFill = document.getElementById('pipeline-progress-fill');
   const progressPct = document.getElementById('pipeline-progress-pct');
@@ -743,6 +858,8 @@ window.approveTalk = async function(id) {
     await Modal.alert({ title: 'Pipeline Action Failed', message: `Pipeline action failed: ${err.message}`, variant: 'danger' });
     if (progressWrap) progressWrap.style.display = 'none';
     setBtnBusy(btn, false);
+    pendingApprovalStage = null;
+    updateStudioLoader(talkStatus);
   }
 };
 
@@ -1276,12 +1393,25 @@ async function pollStudioJobs() {
 
     const currentStatus = getTalkStatus();
     if (data.status && data.status !== currentStatus) {
+      pendingApprovalStage = null;
       location.reload();
       return;
     }
 
-    const hasRunningJob = jobs.some(j => j.status === 'running');
-    const talkStatus = data.status;
+    if (pendingApprovalStage) {
+      if (ACTIVE_PROCESSING_STATES.includes(data.status)) {
+        pendingApprovalStage = null;
+      } else {
+        return;
+      }
+    }
+
+    const activeJob = jobs.find(j => j.status === 'running');
+    const talkStatus = data.status || currentStatus;
+
+    updateStudioLoader(talkStatus, activeJob);
+
+    const hasRunningJob = Boolean(activeJob);
     const isTerminal = ['done', 'failed', 'rejected', 'broken'].includes(talkStatus);
     if (!hasRunningJob && isTerminal && studioPollInterval) {
       clearInterval(studioPollInterval);
@@ -1529,3 +1659,140 @@ document.addEventListener('DOMContentLoaded', () => {
     }, 3000);
   }
 });
+
+
+// ---------------------------------------------------------------------------
+// Organizer Role Request Flow
+// ---------------------------------------------------------------------------
+function initOrganizerRequest() {
+  const btnRequest = document.getElementById('btn-request-organizer');
+  const modal      = document.getElementById('modal-request-organizer');
+  const btnClose   = document.getElementById('btn-close-request-organizer');
+  const btnCancel  = document.getElementById('btn-cancel-request-organizer');
+  const btnSubmit  = document.getElementById('btn-submit-request-organizer');
+  const noteInput  = document.getElementById('organizer-request-note');
+  const noteChars  = document.getElementById('organizer-request-note-chars');
+  const errorEl    = document.getElementById('organizer-request-error');
+  const banner     = document.getElementById('role-request-banner');
+
+  if (!btnRequest || !modal) return;
+
+  function openModal() {
+    if (noteInput) noteInput.value = '';
+    if (noteChars) noteChars.textContent = '0 / 500';
+    if (errorEl) { errorEl.textContent = ''; errorEl.classList.add('hidden'); }
+    modal.classList.remove('hidden');
+    if (noteInput) noteInput.focus();
+  }
+
+  function closeModal() {
+    modal.classList.add('hidden');
+    if (btnRequest) btnRequest.focus();
+  }
+
+  btnRequest.addEventListener('click', openModal);
+  if (btnClose) btnClose.addEventListener('click', closeModal);
+  if (btnCancel) btnCancel.addEventListener('click', closeModal);
+  modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+
+  modal.addEventListener('keydown', (e) => {
+    if (modal.classList.contains('hidden')) return;
+
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeModal();
+      return;
+    }
+
+    if (e.key === 'Tab') {
+      const focusable = modal.querySelectorAll(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+      );
+      const focusableEls = Array.from(focusable).filter(
+        (el) => !el.disabled && el.offsetParent !== null
+      );
+      if (!focusableEls.length) return;
+
+      const firstEl = focusableEls[0];
+      const lastEl = focusableEls[focusableEls.length - 1];
+
+      if (e.shiftKey) {
+        if (document.activeElement === firstEl) {
+          e.preventDefault();
+          lastEl.focus();
+        }
+      } else {
+        if (document.activeElement === lastEl) {
+          e.preventDefault();
+          firstEl.focus();
+        }
+      }
+    }
+  });
+
+  if (noteInput && noteChars) {
+    noteInput.addEventListener('input', () => {
+      noteChars.textContent = `${noteInput.value.length} / 500`;
+    });
+  }
+
+  if (btnSubmit) {
+    btnSubmit.addEventListener('click', async () => {
+      if (errorEl) { errorEl.textContent = ''; errorEl.classList.add('hidden'); }
+      btnSubmit.disabled = true;
+      btnSubmit.textContent = 'Submitting…';
+      try {
+        const fetchFn = window.authFetch || fetch;
+        const resp = await fetchFn('/users/request-organizer', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ note: noteInput ? noteInput.value.trim() : '' }),
+        });
+        let data = {};
+        try {
+          data = await resp.json();
+        } catch (_) {
+          data = {};
+        }
+        if (resp.ok) {
+          closeModal();
+          if (banner) {
+            banner.classList.add('role-request-pending');
+            banner.innerHTML = `
+              <div class="role-request-icon-wrap" aria-hidden="true">
+                <svg class="role-request-hero-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="10"></circle>
+                  <polyline points="12 6 12 12 16 14"></polyline>
+                </svg>
+              </div>
+              <div class="role-request-body">
+                <div class="role-request-title-row">
+                  <h3 class="role-request-title">Organizer Request Pending Review</h3>
+                  <span class="role-request-badge">Pending</span>
+                </div>
+                <p class="role-request-description">Your request for organizer access has been submitted and is pending administrator review.</p>
+              </div>
+            `;
+          }
+        } else {
+          const msg = (typeof data.detail === 'string' && data.detail.trim())
+            ? data.detail
+            : 'Failed to submit request. Please try again.';
+          if (errorEl) { errorEl.textContent = msg; errorEl.classList.remove('hidden'); }
+          btnSubmit.disabled = false;
+          btnSubmit.textContent = 'Submit Request';
+        }
+      } catch (_err) {
+        if (errorEl) { errorEl.textContent = 'Network error. Please try again.'; errorEl.classList.remove('hidden'); }
+        btnSubmit.disabled = false;
+        btnSubmit.textContent = 'Submit Request';
+      }
+    });
+  }
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initOrganizerRequest);
+} else {
+  initOrganizerRequest();
+}

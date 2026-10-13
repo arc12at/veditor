@@ -283,6 +283,11 @@ class TalkJobsResponse(BaseModel):
 class RecordingIngestRequest(BaseModel):
     source_path: str | None = None
     relative_key: str | None = None
+    recording_start: datetime | None = Field(
+        default=None,
+        description="room recording wall-clock start for cut-bound seeding",
+        examples=["2026-09-26T10:00:00Z"],
+    )
 
     @model_validator(mode="after")
     def exactly_one_path(self):
@@ -380,8 +385,15 @@ class UserRead(BaseModel):
     email: str
     role: str
     is_active: bool
+    organizer_requested: bool = False
+    organizer_request_note: str | None = None
+    organizer_requested_at: datetime | None = None
     created_at: datetime
     model_config = ConfigDict(from_attributes=True)
+
+
+class OrganizerRequestCreate(BaseModel):
+    note: str | None = Field(default=None, max_length=500)
 
 
 class UserPromoteRequest(BaseModel):

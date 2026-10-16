@@ -168,13 +168,12 @@ document.addEventListener('DOMContentLoaded', () => {
   const approveModal = document.getElementById('approve-organizer-modal');
   const approveModalUserEmail = document.getElementById('approve-modal-user-email');
   const btnConfirmApprove = document.getElementById('btn-confirm-approve-modal');
-  const btnCancelApprove = document.getElementById('btn-cancel-approve-modal');
   let pendingApproveUserId = null;
   let pendingApproveBtn = null;
 
   function closeApproveModal() {
-    if (approveModal && typeof approveModal.close === 'function' && approveModal.open) {
-      approveModal.close();
+    if (approveModal) {
+      Modal.close(approveModal);
     }
     pendingApproveUserId = null;
     pendingApproveBtn = null;
@@ -184,16 +183,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  if (btnCancelApprove) {
-    btnCancelApprove.addEventListener('click', closeApproveModal);
-  }
-
   if (approveModal) {
-    approveModal.addEventListener('click', (e) => {
-      if (e.target === approveModal) {
-        closeApproveModal();
-      }
-    });
     approveModal.addEventListener('cancel', () => {
       pendingApproveUserId = null;
       pendingApproveBtn = null;
@@ -279,13 +269,8 @@ document.addEventListener('DOMContentLoaded', () => {
         approveModalUserEmail.textContent = userEmail;
       }
 
-      if (approveModal && typeof approveModal.showModal === 'function') {
-        approveModal.showModal();
-      } else {
-        const confirmed = confirm(`Are you sure you want to approve organizer access for ${userEmail}?`);
-        if (confirmed) {
-          executeApprove(userId, btn);
-        }
+      if (approveModal) {
+        Modal.open(approveModal);
       }
     });
   });

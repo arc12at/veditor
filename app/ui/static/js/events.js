@@ -314,6 +314,13 @@ document.addEventListener('DOMContentLoaded', () => {
     btn.addEventListener('click', closeApiKeysModal);
   });
 
+  if (apiKeysModal) {
+    apiKeysModal.addEventListener('close', () => {
+      if (newKeyAlert) newKeyAlert.classList.add('api-key-alert-hidden');
+      if (newKeyInput) newKeyInput.value = '';
+    });
+  }
+
   if (btnGenerateKey) {
     btnGenerateKey.addEventListener('click', async () => {
       if (!currentActiveEventId) return;

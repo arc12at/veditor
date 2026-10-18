@@ -101,25 +101,25 @@
   {% endif %}
 
   <!-- Request Organizer Modal -->
-  <div class="modal-overlay hidden" id="modal-request-organizer" role="dialog" aria-modal="true" aria-labelledby="modal-request-organizer-title">
-    <div class="modal-box">
-      <div class="modal-header">
-        <h2 class="modal-title" id="modal-request-organizer-title">Request Organizer Access</h2>
-        <button class="modal-close" id="btn-close-request-organizer" aria-label="Close">&times;</button>
+  <dialog id="modal-request-organizer" class="v-modal" aria-labelledby="modal-request-organizer-title">
+    <div class="v-modal-card">
+      <div class="v-modal-header">
+        <h3 class="v-modal-title" id="modal-request-organizer-title">Request Organizer Access</h3>
+        <button type="button" class="btn btn-ghost btn-sm" id="btn-close-request-organizer" data-modal-close aria-label="Close dialog">&times;</button>
       </div>
-      <div class="modal-body">
-        <p class="modal-description">Organizer access lets you create events, register talks, and ingest recordings. Optionally describe your role or the event you are organizing.</p>
-        <label for="organizer-request-note" class="form-label">Note <span class="text-muted">(optional)</span></label>
+      <div class="v-modal-body">
+        <p class="v-modal-desc modal-description">Organizer access lets you create events, register talks, and ingest recordings. Optionally describe your role or the event you are organizing.</p>
+        <label for="organizer-request-note" class="v-modal-label form-label">Note <span class="text-muted">(optional)</span></label>
         <textarea id="organizer-request-note" class="form-input" rows="3" maxlength="500" placeholder="e.g. I am organizing FOSSASIA Summit 2027 and need to upload recordings..."></textarea>
         <p class="form-hint" id="organizer-request-note-chars">0 / 500</p>
         <p class="form-error hidden" id="organizer-request-error"></p>
       </div>
-      <div class="modal-footer">
-        <button class="btn btn-secondary" id="btn-cancel-request-organizer" type="button">Cancel</button>
+      <div class="v-modal-footer">
+        <button class="btn btn-secondary" id="btn-cancel-request-organizer" type="button" data-modal-close>Cancel</button>
         <button class="btn btn-primary" id="btn-submit-request-organizer" type="button">Submit Request</button>
       </div>
     </div>
-  </div>
+  </dialog>
 
   <!-- Stats Summary Row -->
   <div class="stats-grid">

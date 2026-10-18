@@ -4,6 +4,16 @@
   'use strict';
 
   const triggerMap = new WeakMap();
+  let dynamicPromptQueue = Promise.resolve();
+
+  function enqueueDynamicPrompt(executor) {
+    const run = () => new Promise((resolve) => {
+      executor(resolve);
+    });
+    const result = dynamicPromptQueue.then(run, run);
+    dynamicPromptQueue = result.catch(() => {});
+    return result;
+  }
 
   const Modal = {
     open(modalOrId) {
@@ -45,7 +55,7 @@
       const confirmText = options.confirmText || 'OK';
       const btnVariant = options.variant === 'danger' ? 'btn-danger' : 'btn-primary';
 
-      return new Promise((resolve) => {
+      return enqueueDynamicPrompt((resolve) => {
         const dialog = document.getElementById('v-dynamic-modal');
         if (!dialog) {
           resolve();
@@ -123,7 +133,7 @@
         ? 'btn-danger'
         : (options.variant === 'warning' ? 'btn-warning' : 'btn-primary');
 
-      return new Promise((resolve) => {
+      return enqueueDynamicPrompt((resolve) => {
         const dialog = document.getElementById('v-dynamic-modal');
         if (!dialog) {
           resolve(false);

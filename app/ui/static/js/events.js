@@ -296,8 +296,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  function closeApiKeysModal() {
-    if (apiKeysModal) Modal.close(apiKeysModal);
+  function cleanupApiKeysModal() {
     if (newKeyAlert) newKeyAlert.classList.add('api-key-alert-hidden');
     if (newKeyInput) newKeyInput.value = '';
     hideWebhookAlert();
@@ -310,15 +309,17 @@ document.addEventListener('DOMContentLoaded', () => {
     currentActiveEventId = null;
   }
 
+  function closeApiKeysModal() {
+    if (apiKeysModal) Modal.close(apiKeysModal);
+    cleanupApiKeysModal();
+  }
+
   document.querySelectorAll('.btn-close-api-keys-modal').forEach(btn => {
     btn.addEventListener('click', closeApiKeysModal);
   });
 
   if (apiKeysModal) {
-    apiKeysModal.addEventListener('close', () => {
-      if (newKeyAlert) newKeyAlert.classList.add('api-key-alert-hidden');
-      if (newKeyInput) newKeyInput.value = '';
-    });
+    apiKeysModal.addEventListener('close', cleanupApiKeysModal);
   }
 
   if (btnGenerateKey) {

@@ -69,8 +69,10 @@
         const header = document.createElement('div');
         header.className = 'v-modal-header';
         const titleEl = document.createElement('h3');
+        titleEl.id = 'v-dynamic-modal-title';
         titleEl.className = 'v-modal-title';
         titleEl.textContent = title;
+        dialog.setAttribute('aria-labelledby', 'v-dynamic-modal-title');
         const closeBtn = document.createElement('button');
         closeBtn.type = 'button';
         closeBtn.className = 'btn btn-ghost btn-sm';
@@ -149,8 +151,10 @@
         const header = document.createElement('div');
         header.className = 'v-modal-header';
         const titleEl = document.createElement('h3');
+        titleEl.id = 'v-dynamic-modal-title';
         titleEl.className = 'v-modal-title';
         titleEl.textContent = title;
+        dialog.setAttribute('aria-labelledby', 'v-dynamic-modal-title');
         const closeBtn = document.createElement('button');
         closeBtn.type = 'button';
         closeBtn.className = 'btn btn-ghost btn-sm';

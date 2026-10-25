@@ -146,9 +146,104 @@ window.closeImportModal = function() {
   if (m) Modal.close(m);
 };
 
+function _setAttachSourceMode(mode) {
+  const btnUrl = document.getElementById('btn-source-url');
+  const btnFile = document.getElementById('btn-source-file');
+  const panelUrl = document.getElementById('attach-source-url-panel');
+  const panelFile = document.getElementById('attach-source-file-panel');
+
+  if (mode === 'file') {
+    if (btnUrl) btnUrl.classList.remove('attach-source-active');
+    if (btnFile) btnFile.classList.add('attach-source-active');
+    if (panelUrl) panelUrl.classList.add('attach-source-hidden');
+    if (panelFile) panelFile.classList.remove('attach-source-hidden');
+  } else {
+    if (btnFile) btnFile.classList.remove('attach-source-active');
+    if (btnUrl) btnUrl.classList.add('attach-source-active');
+    if (panelFile) panelFile.classList.add('attach-source-hidden');
+    if (panelUrl) panelUrl.classList.remove('attach-source-hidden');
+  }
+}
+
+async function _loadRoomDays(room) {
+  const dateSel = document.getElementById('attach-room-date');
+  if (!dateSel) return;
+  dateSel.innerHTML = '<option value="">All Days / Select Day</option>';
+  if (!room || !room.trim()) return;
+
+  const urlParams = new URLSearchParams(window.location.search);
+  const eventId = urlParams.get('event_id');
+  let url = `/talks/room/days?room=${encodeURIComponent(room.trim())}`;
+  if (eventId) {
+    url += `&event_id=${encodeURIComponent(eventId)}`;
+  }
+
+  try {
+    const res = await (window.authFetch || fetch)(url);
+    if (!res.ok) return;
+    const days = await res.json();
+    if (Array.isArray(days) && days.length > 0) {
+      dateSel.innerHTML = '';
+      if (days.length > 1) {
+        const defaultOpt = document.createElement('option');
+        defaultOpt.value = '';
+        defaultOpt.textContent = `Select Day (${days.length} days found)`;
+        dateSel.appendChild(defaultOpt);
+      }
+      days.forEach(d => {
+        const opt = document.createElement('option');
+        opt.value = d.date;
+        opt.textContent = d.label;
+        dateSel.appendChild(opt);
+      });
+      if (days.length === 1) {
+        dateSel.selectedIndex = 0;
+      }
+    }
+  } catch (e) {
+    console.warn('Failed to load room days:', e);
+  } finally {
+    _updateAttachSubmitLabel();
+  }
+}
+
+function _updateAttachSubmitLabel() {
+  const roomSel = document.getElementById('attach-room-select') || document.getElementById('attach-room-input');
+  const dateSel = document.getElementById('attach-room-date');
+  const btn = document.getElementById('btn-submit-attach-room');
+  if (!btn) return;
+
+  const room = (roomSel && roomSel.value) ? roomSel.value.trim() : '';
+  const selectedDateOpt = dateSel && dateSel.selectedOptions && dateSel.selectedOptions[0];
+  const selectedDate = (dateSel && dateSel.value) ? dateSel.value : '';
+
+  if (room && selectedDate && selectedDateOpt) {
+    const text = selectedDateOpt.textContent;
+    const dayMatch = text.match(/^(Day \d+)/);
+    const dayPrefix = dayMatch ? dayMatch[1] : selectedDate;
+    btn.textContent = `Attach to ${dayPrefix} Sessions (${room})`;
+  } else if (room) {
+    btn.textContent = `Attach to All Sessions in ${room}`;
+  } else {
+    btn.textContent = 'Attach Recording';
+  }
+}
+
+function _initAttachRoomModal() {
+  const roomSel = document.getElementById('attach-room-select') || document.getElementById('attach-room-input');
+  if (roomSel && roomSel.value) {
+    _loadRoomDays(roomSel.value);
+  }
+  _setAttachSourceMode('url');
+  _updateAttachSubmitLabel();
+}
+
 window.openAttachRoomModal = function() {
   const m = document.getElementById('modal-attach-room');
-  if (m) Modal.open(m);
+  if (m) {
+    Modal.open(m);
+    _initAttachRoomModal();
+  }
 };
 
 window.closeAttachRoomModal = function() {
@@ -157,36 +252,46 @@ window.closeAttachRoomModal = function() {
 };
 
 window.submitAttachRoomRecording = async function() {
-  const roomInput = (document.getElementById('attach-room-input') || {}).value || '';
+  const roomSelect = document.getElementById('attach-room-select') || document.getElementById('attach-room-input');
+  const roomInput = roomSelect ? roomSelect.value : '';
+  const dateSelect = document.getElementById('attach-room-date');
+  const targetDate = dateSelect ? dateSelect.value : '';
   const urlInput = (document.getElementById('attach-room-url') || {}).value || '';
   const fileInput = document.getElementById('attach-room-file');
   const btn = document.getElementById('btn-submit-attach-room');
+
+  const btnFile = document.getElementById('btn-source-file');
+  const isFileMode = btnFile && btnFile.classList.contains('attach-source-active');
 
   if (!roomInput.trim()) {
     await Modal.alert({ title: 'Validation Error', message: 'Please enter or select a room name.' });
     return;
   }
+
   const hasFile = fileInput && fileInput.files && fileInput.files[0];
   const hasUrl = urlInput.trim().length > 0;
 
-  if (!hasFile && !hasUrl) {
-    await Modal.alert({ title: 'Validation Error', message: 'Please provide a video URL or select a video recording file.' });
+  if (isFileMode && !hasFile) {
+    await Modal.alert({ title: 'Validation Error', message: 'Please choose or drop a video file to upload.' });
     return;
   }
-  if (hasFile && hasUrl) {
-    await Modal.alert({ title: 'Validation Error', message: 'Please provide either a video URL or a file upload, not both.' });
+  if (!isFileMode && !hasUrl) {
+    await Modal.alert({ title: 'Validation Error', message: 'Please provide a valid video recording URL.' });
     return;
   }
 
-  setBtnBusy(btn, true, 'Attaching to Room Talks...');
+  setBtnBusy(btn, true, 'Attaching Recording...');
 
   try {
     const fd = new FormData();
     fd.append('room', roomInput.trim());
-    if (hasUrl) {
-      fd.append('video_url', urlInput.trim());
-    } else {
+    if (targetDate) {
+      fd.append('target_date', targetDate);
+    }
+    if (isFileMode) {
       fd.append('file', fileInput.files[0]);
+    } else {
+      fd.append('video_url', urlInput.trim());
     }
 
     const urlParams = new URLSearchParams(window.location.search);
@@ -596,6 +701,77 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const btnSubmitAttach = document.getElementById('btn-submit-attach-room');
   if (btnSubmitAttach) btnSubmitAttach.addEventListener('click', window.submitAttachRoomRecording);
+
+  // Attach Room Recording UI listeners
+  const roomSelect = document.getElementById('attach-room-select');
+  if (roomSelect) {
+    roomSelect.addEventListener('change', () => {
+      _loadRoomDays(roomSelect.value);
+    });
+  }
+
+  const dateSelect = document.getElementById('attach-room-date');
+  if (dateSelect) {
+    dateSelect.addEventListener('change', () => {
+      _updateAttachSubmitLabel();
+    });
+  }
+
+  const btnSourceUrl = document.getElementById('btn-source-url');
+  if (btnSourceUrl) {
+    btnSourceUrl.addEventListener('click', () => _setAttachSourceMode('url'));
+  }
+  const btnSourceFile = document.getElementById('btn-source-file');
+  if (btnSourceFile) {
+    btnSourceFile.addEventListener('click', () => _setAttachSourceMode('file'));
+  }
+
+  const dropzone = document.getElementById('attach-dropzone');
+  const attachFileInput = document.getElementById('attach-room-file');
+  const dropLabel = document.getElementById('attach-dropzone-label');
+  if (dropzone && attachFileInput) {
+    dropzone.addEventListener('click', () => attachFileInput.click());
+    dropzone.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        attachFileInput.click();
+      }
+    });
+
+    ['dragenter', 'dragover'].forEach(eventName => {
+      dropzone.addEventListener(eventName, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropzone.classList.add('drag-over');
+      });
+    });
+
+    ['dragleave', 'drop'].forEach(eventName => {
+      dropzone.addEventListener(eventName, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropzone.classList.remove('drag-over');
+      });
+    });
+
+    dropzone.addEventListener('drop', (e) => {
+      const dt = e.dataTransfer;
+      if (dt && dt.files && dt.files.length) {
+        attachFileInput.files = dt.files;
+        const f = attachFileInput.files[0];
+        const sizeMB = (f.size / (1024 * 1024)).toFixed(1);
+        if (dropLabel) dropLabel.innerHTML = `<strong>${f.name}</strong> (${sizeMB} MB)`;
+      }
+    });
+
+    attachFileInput.addEventListener('change', () => {
+      if (attachFileInput.files && attachFileInput.files.length) {
+        const f = attachFileInput.files[0];
+        const sizeMB = (f.size / (1024 * 1024)).toFixed(1);
+        if (dropLabel) dropLabel.innerHTML = `<strong>${f.name}</strong> (${sizeMB} MB)`;
+      }
+    });
+  }
 
   const btnSubmitQuickTalk = document.getElementById('btn-submit-quick-talk');
   if (btnSubmitQuickTalk) btnSubmitQuickTalk.addEventListener('click', window.submitQuickTalk);

@@ -3319,6 +3319,7 @@ def test_attach_room_recording_omitted_start_excludes_out_of_window_talks(
                 data={
                     "room": "Room Window",
                     "event_id": str(event.id),
+                    "target_date": "2026-09-25",
                 },
                 files={"file": ("day1_recording.mp4", f_vid, "video/mp4")},
                 headers={"X-API-Key": api_key},
@@ -3956,3 +3957,100 @@ def test_sso_speaker_view_derived_from_email_match(client: TestClient, db_sessio
 def test_talk_speaker_email_index():
     """Ensure speaker_email column has an index defined on models.Talk."""
     assert models.Talk.__table__.c.speaker_email.index is True
+
+
+def test_room_days_and_targeted_multi_day_room_attachment(client, db_session):
+    event = models.Event(name="Multi-Day Conf")
+    db_session.add(event)
+    db_session.commit()
+
+    day1_start = datetime(2026, 10, 25, 10, 0, tzinfo=UTC)
+    day2_start = datetime(2026, 10, 26, 10, 0, tzinfo=UTC)
+
+    t1_d1 = models.Talk(
+        event_id=event.id,
+        title="Day 1 Morning",
+        room="Auditorium A",
+        start=day1_start,
+        end=day1_start + timedelta(hours=1),
+        status="waiting_for_files",
+    )
+    t2_d1 = models.Talk(
+        event_id=event.id,
+        title="Day 1 Afternoon",
+        room="Auditorium A",
+        start=day1_start + timedelta(hours=2),
+        end=day1_start + timedelta(hours=3),
+        status="waiting_for_files",
+    )
+    t3_d2 = models.Talk(
+        event_id=event.id,
+        title="Day 2 Morning",
+        room="Auditorium A",
+        start=day2_start,
+        end=day2_start + timedelta(hours=1),
+        status="waiting_for_files",
+    )
+    for t in [t1_d1, t2_d1, t3_d2]:
+        db_session.add(t)
+    db_session.commit()
+
+    api_key = f"key_{uuid.uuid4().hex}"
+    client_model = models.Client(hashed_key=hash_api_key(api_key), event_ids=[event.id])
+    db_session.add(client_model)
+    db_session.commit()
+
+    # 1. Test GET /talks/room/days
+    resp_days = client.get(
+        f"/talks/room/days?room=Auditorium%20A&event_id={event.id}",
+        headers={"X-API-Key": api_key},
+    )
+    assert resp_days.status_code == 200
+    days_data = resp_days.json()
+    assert len(days_data) == 2
+    assert days_data[0]["date"] == "2026-10-25"
+    assert days_data[0]["session_count"] == 2
+    assert "Day 1" in days_data[0]["label"]
+    assert days_data[1]["date"] == "2026-10-26"
+    assert days_data[1]["session_count"] == 1
+    assert "Day 2" in days_data[1]["label"]
+
+    # 2. Attaching to multi-day room without target_date returns 400
+    with patch("app.routes.talks.heavy_queue"):
+        res_no_day = client.post(
+            "/talks/room/attach-recording",
+            data={
+                "room": "Auditorium A",
+                "event_id": str(event.id),
+                "video_url": "https://example.com/day1.mp4",
+            },
+            headers={"X-API-Key": api_key},
+        )
+        assert res_no_day.status_code == 400
+        assert "spans 2 days" in res_no_day.json()["detail"]
+        assert "target day" in res_no_day.json()["detail"]
+
+    # 3. Attaching to multi-day room with target_date for Day 1 only binds to Day 1 talks
+    with patch("app.routes.talks.heavy_queue"):
+        res_target = client.post(
+            "/talks/room/attach-recording",
+            data={
+                "room": "Auditorium A",
+                "event_id": str(event.id),
+                "video_url": "https://example.com/day1.mp4",
+                "target_date": "2026-10-25",
+            },
+            headers={"X-API-Key": api_key},
+        )
+        assert res_target.status_code == 200
+        data = res_target.json()
+        assert data["attached_count"] == 2
+        assert set(data["talk_ids"]) == {t1_d1.id, t2_d1.id}
+        assert data["target_date"] == "2026-10-25"
+
+        db_session.refresh(t1_d1)
+        db_session.refresh(t2_d1)
+        db_session.refresh(t3_d2)
+        assert t1_d1.status == "detecting"
+        assert t2_d1.status == "detecting"
+        assert t3_d2.status == "waiting_for_files"

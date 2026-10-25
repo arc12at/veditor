@@ -1,4 +1,4 @@
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from unittest.mock import MagicMock
 
 import pytest
@@ -1553,4 +1553,82 @@ def test_studio_events_create_and_edit_invalid_review_window(client, db_session)
     assert (
         "Speaker review window must be a positive integer"
         in resp_edit_nan.json()["detail"]
+    )
+
+
+def test_create_and_edit_event_with_dates(client: TestClient, db_session):
+    user = create_user(db_session, "dates_organizer@test.com", "organizer")
+    authenticate_client(client, user)
+
+    # 1. Reject create when end_date < start_date
+    resp_invalid = client.post(
+        "/studio/events",
+        data={
+            "name": "Invalid Date Event",
+            "start_date": "2026-10-27",
+            "end_date": "2026-10-25",
+        },
+    )
+    assert resp_invalid.status_code == 400
+    assert "End date must be greater than or equal to start date" in resp_invalid.text
+
+    # 2. Successful create with start and end dates
+    resp_create = client.post(
+        "/studio/events",
+        data={
+            "name": "FOSSASIA Summit 2026",
+            "start_date": "2026-10-25",
+            "end_date": "2026-10-27",
+        },
+        follow_redirects=False,
+    )
+    assert resp_create.status_code == 303
+    event = (
+        db_session.query(models.Event)
+        .filter(models.Event.name == "FOSSASIA Summit 2026")
+        .first()
+    )
+    assert event is not None
+    assert event.start_date == date(2026, 10, 25)
+    assert event.end_date == date(2026, 10, 27)
+    assert event.duration_days == 3
+
+    # 3. GET /studio/events displays date range and duration
+    resp_list = client.get("/studio/events")
+    assert resp_list.status_code == 200
+    assert "Duration / Dates" in resp_list.text
+    assert "Oct 25" in resp_list.text
+    assert "Oct 27, 2026" in resp_list.text
+    assert "(3 days)" in resp_list.text
+
+    # 4. Successful edit of dates
+    resp_edit = client.post(
+        f"/studio/events/{event.id}/edit",
+        data={
+            "name": "FOSSASIA Summit 2026 (Extended)",
+            "start_date": "2026-10-24",
+            "end_date": "2026-10-28",
+        },
+        follow_redirects=False,
+    )
+    assert resp_edit.status_code == 303
+    db_session.refresh(event)
+    assert event.name == "FOSSASIA Summit 2026 (Extended)"
+    assert event.start_date == date(2026, 10, 24)
+    assert event.end_date == date(2026, 10, 28)
+    assert event.duration_days == 5
+
+    # 5. Reject edit when end_date < start_date
+    resp_edit_invalid = client.post(
+        f"/studio/events/{event.id}/edit",
+        data={
+            "name": "FOSSASIA Summit 2026 (Extended)",
+            "start_date": "2026-10-28",
+            "end_date": "2026-10-24",
+        },
+    )
+    assert resp_edit_invalid.status_code == 400
+    assert (
+        "End date must be greater than or equal to start date"
+        in resp_edit_invalid.json()["detail"]
     )

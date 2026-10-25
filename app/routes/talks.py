@@ -4,7 +4,7 @@ import math
 import shutil
 import traceback
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import ROUND_CEILING, Decimal
 from pathlib import Path
 from typing import Annotated
@@ -146,6 +146,85 @@ def create_or_update_talk(
         db.refresh(talk)
         response.status_code = status.HTTP_200_OK
         return talk
+
+
+@router.get("/room/days")
+def get_room_days(
+    room: str,
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+    event_id: int | None = None,
+):
+    """Retrieve distinct scheduled days and session counts for a room."""
+    if not room or not room.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Room name is required",
+        )
+    room = room.strip()
+
+    if event_id is not None:
+        check_event_access(event_id, user, db)
+    else:
+        query = (
+            db.query(models.Event)
+            .join(models.Talk, models.Talk.event_id == models.Event.id)
+            .filter(models.Talk.room == room)
+            .distinct()
+        )
+        if user.is_platform or user.is_human_admin:
+            pass
+        elif user.source in ("api_key", "sso"):
+            query = query.filter(models.Event.id.in_(user.event_ids))
+        elif user.role != "admin":
+            query = query.filter(models.Event.created_by_user_id == user.user_id)
+
+        matching_events = query.all()
+        if not matching_events:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No accessible event found with room '{room}'",
+            )
+        if len(matching_events) > 1:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Multiple events found with room '{room}'. Please specify event_id.",
+            )
+        event_id = matching_events[0].id
+
+    talks = (
+        db.query(models.Talk)
+        .filter(models.Talk.event_id == event_id, models.Talk.room == room)
+        .order_by(models.Talk.start)
+        .all()
+    )
+
+    days_map: dict[date, list[models.Talk]] = {}
+    for t in talks:
+        d = t.start.date()
+        days_map.setdefault(d, []).append(t)
+
+    result = []
+    for idx, (d, day_talks) in enumerate(days_map.items(), 1):
+        total_count = len(day_talks)
+        waiting_count = sum(
+            1
+            for t in day_talks
+            if t.status in ("waiting_for_files", "detecting", "broken")
+        )
+        formatted_date = f"{d.strftime('%b')} {d.day}, {d.year}"
+        label = f"Day {idx}: {formatted_date} ({total_count} session{'s' if total_count != 1 else ''})"
+        result.append(
+            {
+                "day_number": idx,
+                "date": d.isoformat(),
+                "formatted_date": formatted_date,
+                "session_count": total_count,
+                "eligible_count": waiting_count,
+                "label": label,
+            }
+        )
+    return result
 
 
 @router.get("/{talk_id}", response_model=schemas.TalkWithJobsRead)
@@ -1829,6 +1908,7 @@ async def attach_room_recording(
     relative_key: Annotated[str | None, Form()] = None,
     source_path: Annotated[str | None, Form()] = None,
     recording_start: Annotated[datetime | None, Form()] = None,
+    target_date: Annotated[date | None, Form()] = None,
 ):
     """Attach a continuous room recording to all scheduled sessions in that room."""
     # Support JSON requests as well as multipart/form-data
@@ -1846,6 +1926,13 @@ async def attach_room_recording(
                 if rec_start_str and not recording_start:
                     try:
                         recording_start = datetime.fromisoformat(rec_start_str)
+                    except ValueError:
+                        pass
+                target_date_str = body.get("target_date")
+                if target_date_str and not target_date:
+                    try:
+                        if isinstance(target_date_str, str):
+                            target_date = date.fromisoformat(target_date_str)
                     except ValueError:
                         pass
         except (ValueError, TypeError, UnicodeDecodeError):  # fmt: skip
@@ -1901,16 +1988,41 @@ async def attach_room_recording(
             detail=f"No talks found in room '{room}' for event {event_id}",
         )
 
-    eligible_talks = [
-        t
-        for t in all_room_talks
-        if t.status in ("waiting_for_files", "detecting", "broken")
-    ]
-    if not eligible_talks:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"No talks in room '{room}' are currently waiting for files (sessions may already be in review or published)",
-        )
+    distinct_days = sorted({t.start.date() for t in all_room_talks})
+    if target_date is not None:
+        eligible_talks = [
+            t
+            for t in all_room_talks
+            if t.start.date() == target_date
+            and t.status in ("waiting_for_files", "detecting", "broken")
+        ]
+        if not eligible_talks:
+            day_talks = [t for t in all_room_talks if t.start.date() == target_date]
+            if not day_talks:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"No talks found in room '{room}' on {target_date.isoformat()}",
+                )
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"No talks in room '{room}' on {target_date.isoformat()} are currently waiting for files (sessions may already be in review or published)",
+            )
+    else:
+        if len(distinct_days) > 1:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Room '{room}' spans {len(distinct_days)} days ({distinct_days[0].isoformat()} to {distinct_days[-1].isoformat()}). Please specify a target day to attach recording.",
+            )
+        eligible_talks = [
+            t
+            for t in all_room_talks
+            if t.status in ("waiting_for_files", "detecting", "broken")
+        ]
+        if not eligible_talks:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"No talks in room '{room}' are currently waiting for files (sessions may already be in review or published)",
+            )
 
     # Validate recording source
     has_file = bool(file and file.filename)
@@ -1982,6 +2094,7 @@ async def attach_room_recording(
             event_id=event_id,
             talk_ids=talk_ids,
             recording_duration_seconds=None,
+            target_date=target_date,
         )
 
     # Stage media
@@ -2287,4 +2400,5 @@ async def attach_room_recording(
         event_id=event_id,
         talk_ids=talk_ids,
         recording_duration_seconds=duration,
+        target_date=target_date,
     )

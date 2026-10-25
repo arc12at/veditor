@@ -1,5 +1,5 @@
 import re
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from enum import Enum
 from typing import Annotated, Any, Literal
@@ -25,6 +25,8 @@ class EventBase(BaseModel):
     external_id: str | None = None
     retention_overrides: dict[str, Any] | None = None
     speaker_magic_link_expire_hours: StrictPositiveInt | None = None
+    start_date: date | None = None
+    end_date: date | None = None
 
     @field_validator("retention_overrides")
     @classmethod
@@ -32,6 +34,12 @@ class EventBase(BaseModel):
         cls, v: dict[str, Any] | None
     ) -> dict[str, Any] | None:
         return validate_retention_overrides(v)
+
+    @model_validator(mode="after")
+    def _validate_dates(self):
+        if self.start_date and self.end_date and self.end_date < self.start_date:
+            raise ValueError("end_date must be greater than or equal to start_date")
+        return self
 
 
 class EventCreate(EventBase):
@@ -44,6 +52,8 @@ class EventUpdate(BaseModel):
     external_id: str | None = None
     retention_overrides: dict[str, Any] | None = None
     speaker_magic_link_expire_hours: StrictPositiveInt | None = None
+    start_date: date | None = None
+    end_date: date | None = None
 
     @field_validator("retention_overrides")
     @classmethod
@@ -51,6 +61,12 @@ class EventUpdate(BaseModel):
         cls, v: dict[str, Any] | None
     ) -> dict[str, Any] | None:
         return validate_retention_overrides(v)
+
+    @model_validator(mode="after")
+    def _validate_dates(self):
+        if self.start_date and self.end_date and self.end_date < self.start_date:
+            raise ValueError("end_date must be greater than or equal to start_date")
+        return self
 
 
 class EventRead(EventBase):
@@ -487,6 +503,7 @@ class RoomRecordingAttachResponse(BaseModel):
     event_id: int
     talk_ids: list[int]
     recording_duration_seconds: float | None = None
+    target_date: date | None = None
 
 
 class SystemSettingOption(BaseModel):

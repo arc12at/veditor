@@ -33,6 +33,29 @@
   min-width: 260px;
 }
 
+.event-create-dates {
+  display: flex;
+  gap: 12px;
+  width: 100%;
+}
+
+.event-create-dates .event-create-field {
+  min-width: 130px;
+}
+
+.event-create-duration-field {
+  max-width: 140px;
+}
+
+@media (max-width: 640px) {
+  .event-create-dates {
+    flex-direction: column;
+  }
+  .event-create-duration-field {
+    max-width: 100%;
+  }
+}
+
 .event-create-label {
   display: block;
   font-size: 0.8rem;

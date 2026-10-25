@@ -1,5 +1,5 @@
 import socket
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -1323,3 +1323,77 @@ def test_event_create_and_patch_speaker_magic_link_expire_hours(mock_db):
         json={"name": "Strict Int Event", "speaker_magic_link_expire_hours": True},
     )
     assert res_bool_post.status_code == 422
+
+
+def test_event_duration_days_property():
+    e1 = models.Event(
+        name="Summit", start_date=date(2026, 10, 25), end_date=date(2026, 10, 27)
+    )
+    assert e1.duration_days == 3
+
+    e2 = models.Event(
+        name="Single Day", start_date=date(2026, 10, 25), end_date=date(2026, 10, 25)
+    )
+    assert e2.duration_days == 1
+
+    e3 = models.Event(name="No Dates")
+    assert e3.duration_days == 1
+
+
+def test_event_schema_date_validation():
+    ev = schemas.EventCreate(
+        name="FOSSASIA", start_date=date(2026, 10, 25), end_date=date(2026, 10, 27)
+    )
+    assert ev.start_date == date(2026, 10, 25)
+    assert ev.end_date == date(2026, 10, 27)
+
+    with pytest.raises(
+        Exception, match="end_date must be greater than or equal to start_date"
+    ):
+        schemas.EventCreate(
+            name="Invalid", start_date=date(2026, 10, 27), end_date=date(2026, 10, 25)
+        )
+
+    with pytest.raises(
+        Exception, match="end_date must be greater than or equal to start_date"
+    ):
+        schemas.EventUpdate(start_date=date(2026, 10, 27), end_date=date(2026, 10, 25))
+
+
+def test_event_create_and_patch_dates(mock_db):
+    app.dependency_overrides[get_db] = lambda: mock_db
+    app.dependency_overrides[get_current_user] = lambda: CurrentUser(
+        user_id=5, role="organizer", source="jwt"
+    )
+
+    mock_event = models.Event(
+        id=101,
+        name="Date Event",
+        created_by_user_id=5,
+        start_date=date(2026, 10, 25),
+        end_date=date(2026, 10, 26),
+    )
+    mock_db.query.return_value.filter.return_value.first.return_value = mock_event
+
+    res_post = client.post(
+        "/events",
+        json={
+            "name": "Multi-Day Conference",
+            "start_date": "2026-10-25",
+            "end_date": "2026-10-27",
+        },
+    )
+    assert res_post.status_code == 201
+
+    res_patch = client.patch(
+        "/events/101",
+        json={"end_date": "2026-10-28"},
+    )
+    assert res_patch.status_code == 200
+    assert mock_event.end_date == date(2026, 10, 28)
+
+    res_invalid_patch = client.patch(
+        "/events/101",
+        json={"end_date": "2026-10-20"},
+    )
+    assert res_invalid_patch.status_code == 400

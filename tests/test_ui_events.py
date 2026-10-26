@@ -1632,3 +1632,23 @@ def test_create_and_edit_event_with_dates(client: TestClient, db_session):
         "End date must be greater than or equal to start date"
         in resp_edit_invalid.json()["detail"]
     )
+
+    # 6. Events with multi-year date range and end-date only
+    ev_multiyear = models.Event(
+        name="New Year Festival",
+        start_date=date(2026, 12, 30),
+        end_date=date(2027, 1, 3),
+        created_by_user_id=user.id,
+    )
+    ev_endonly = models.Event(
+        name="Deadline Conf",
+        end_date=date(2026, 11, 15),
+        created_by_user_id=user.id,
+    )
+    db_session.add_all([ev_multiyear, ev_endonly])
+    db_session.commit()
+
+    resp_rendered = client.get("/studio/events")
+    assert resp_rendered.status_code == 200
+    assert "Dec 30, 2026 – Jan 3, 2027" in resp_rendered.text
+    assert "Until Nov 15, 2026" in resp_rendered.text

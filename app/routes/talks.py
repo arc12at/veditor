@@ -1910,7 +1910,11 @@ async def attach_room_recording(
     recording_start: Annotated[datetime | None, Form()] = None,
     target_date: Annotated[date | None, Form()] = None,
 ):
-    """Attach a continuous room recording to all scheduled sessions in that room."""
+    """Attach a continuous room recording to scheduled sessions in that room.
+
+    If target_date is specified, only sessions on that date are attached.
+    For rooms spanning multiple scheduled days, target_date is required.
+    """
     # Support JSON requests as well as multipart/form-data
     content_type = request.headers.get("content-type", "")
     if content_type.startswith("application/json"):
@@ -1928,13 +1932,21 @@ async def attach_room_recording(
                         recording_start = datetime.fromisoformat(rec_start_str)
                     except ValueError:
                         pass
-                target_date_str = body.get("target_date")
-                if target_date_str and not target_date:
-                    try:
-                        if isinstance(target_date_str, str):
-                            target_date = date.fromisoformat(target_date_str)
-                    except ValueError:
-                        pass
+                if "target_date" in body:
+                    target_date_val = body.get("target_date")
+                    if target_date_val is not None and not target_date:
+                        if not isinstance(target_date_val, str):
+                            raise HTTPException(
+                                status_code=status.HTTP_400_BAD_REQUEST,
+                                detail=f"Invalid target_date format: '{target_date_val}', expected YYYY-MM-DD",
+                            )
+                        try:
+                            target_date = date.fromisoformat(target_date_val)
+                        except ValueError as exc:
+                            raise HTTPException(
+                                status_code=status.HTTP_400_BAD_REQUEST,
+                                detail=f"Invalid target_date format: '{target_date_val}', expected YYYY-MM-DD",
+                            ) from exc
         except (ValueError, TypeError, UnicodeDecodeError):  # fmt: skip
             pass
 

@@ -4054,3 +4054,30 @@ def test_room_days_and_targeted_multi_day_room_attachment(client, db_session):
         assert t1_d1.status == "detecting"
         assert t2_d1.status == "detecting"
         assert t3_d2.status == "waiting_for_files"
+
+    # 4. Attaching with invalid JSON target_date returns 400
+    res_invalid_json_date = client.post(
+        "/talks/room/attach-recording",
+        json={
+            "room": "Auditorium A",
+            "event_id": event.id,
+            "video_url": "https://example.com/day1.mp4",
+            "target_date": "not-a-valid-date",
+        },
+        headers={"X-API-Key": api_key, "Content-Type": "application/json"},
+    )
+    assert res_invalid_json_date.status_code == 400
+    assert "Invalid target_date format" in res_invalid_json_date.json()["detail"]
+
+    res_non_string_json_date = client.post(
+        "/talks/room/attach-recording",
+        json={
+            "room": "Auditorium A",
+            "event_id": event.id,
+            "video_url": "https://example.com/day1.mp4",
+            "target_date": 12345,
+        },
+        headers={"X-API-Key": api_key, "Content-Type": "application/json"},
+    )
+    assert res_non_string_json_date.status_code == 400
+    assert "Invalid target_date format" in res_non_string_json_date.json()["detail"]

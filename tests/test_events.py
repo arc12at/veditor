@@ -1384,6 +1384,9 @@ def test_event_create_and_patch_dates(mock_db):
         },
     )
     assert res_post.status_code == 201
+    data_post = res_post.json()
+    assert data_post["start_date"] == "2026-10-25"
+    assert data_post["end_date"] == "2026-10-27"
 
     res_patch = client.patch(
         "/events/101",
@@ -1391,6 +1394,18 @@ def test_event_create_and_patch_dates(mock_db):
     )
     assert res_patch.status_code == 200
     assert mock_event.end_date == date(2026, 10, 28)
+
+    res_clear = client.patch(
+        "/events/101",
+        json={"start_date": None, "end_date": None},
+    )
+    assert res_clear.status_code == 200
+    assert mock_event.start_date is None
+    assert mock_event.end_date is None
+
+    # Reset dates on mock_event to test partial patch conflict with existing start_date
+    mock_event.start_date = date(2026, 10, 25)
+    mock_event.end_date = date(2026, 10, 28)
 
     res_invalid_patch = client.patch(
         "/events/101",

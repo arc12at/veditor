@@ -165,10 +165,28 @@ function _setAttachSourceMode(mode) {
   }
 }
 
+function _setDropzoneFileName(file) {
+  const dropLabel = document.getElementById('attach-dropzone-label');
+  if (!dropLabel || !file) return;
+  const sizeMB = (file.size / (1024 * 1024)).toFixed(1);
+  dropLabel.textContent = '';
+  const strong = document.createElement('strong');
+  strong.textContent = file.name;
+  dropLabel.appendChild(strong);
+  dropLabel.appendChild(document.createTextNode(` (${sizeMB} MB)`));
+}
+
+let _loadRoomDaysSeq = 0;
+
 async function _loadRoomDays(room) {
+  const currentSeq = ++_loadRoomDaysSeq;
   const dateSel = document.getElementById('attach-room-date');
   if (!dateSel) return;
-  dateSel.innerHTML = '<option value="">All Days / Select Day</option>';
+  dateSel.textContent = '';
+  const initialOpt = document.createElement('option');
+  initialOpt.value = '';
+  initialOpt.textContent = 'All Days / Select Day';
+  dateSel.appendChild(initialOpt);
   if (!room || !room.trim()) return;
 
   const urlParams = new URLSearchParams(window.location.search);
@@ -180,10 +198,12 @@ async function _loadRoomDays(room) {
 
   try {
     const res = await (window.authFetch || fetch)(url);
+    if (currentSeq !== _loadRoomDaysSeq) return;
     if (!res.ok) return;
     const days = await res.json();
+    if (currentSeq !== _loadRoomDaysSeq) return;
     if (Array.isArray(days) && days.length > 0) {
-      dateSel.innerHTML = '';
+      dateSel.textContent = '';
       if (days.length > 1) {
         const defaultOpt = document.createElement('option');
         defaultOpt.value = '';
@@ -201,9 +221,13 @@ async function _loadRoomDays(room) {
       }
     }
   } catch (e) {
-    console.warn('Failed to load room days:', e);
+    if (currentSeq === _loadRoomDaysSeq) {
+      console.warn('Failed to load room days:', e);
+    }
   } finally {
-    _updateAttachSubmitLabel();
+    if (currentSeq === _loadRoomDaysSeq) {
+      _updateAttachSubmitLabel();
+    }
   }
 }
 
@@ -728,9 +752,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const dropzone = document.getElementById('attach-dropzone');
   const attachFileInput = document.getElementById('attach-room-file');
-  const dropLabel = document.getElementById('attach-dropzone-label');
   if (dropzone && attachFileInput) {
-    dropzone.addEventListener('click', () => attachFileInput.click());
+    attachFileInput.addEventListener('click', (e) => e.stopPropagation());
+    dropzone.addEventListener('click', (e) => {
+      if (e.target === attachFileInput) return;
+      attachFileInput.click();
+    });
     dropzone.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
@@ -758,17 +785,13 @@ document.addEventListener('DOMContentLoaded', () => {
       const dt = e.dataTransfer;
       if (dt && dt.files && dt.files.length) {
         attachFileInput.files = dt.files;
-        const f = attachFileInput.files[0];
-        const sizeMB = (f.size / (1024 * 1024)).toFixed(1);
-        if (dropLabel) dropLabel.innerHTML = `<strong>${f.name}</strong> (${sizeMB} MB)`;
+        _setDropzoneFileName(attachFileInput.files[0]);
       }
     });
 
     attachFileInput.addEventListener('change', () => {
       if (attachFileInput.files && attachFileInput.files.length) {
-        const f = attachFileInput.files[0];
-        const sizeMB = (f.size / (1024 * 1024)).toFixed(1);
-        if (dropLabel) dropLabel.innerHTML = `<strong>${f.name}</strong> (${sizeMB} MB)`;
+        _setDropzoneFileName(attachFileInput.files[0]);
       }
     });
   }

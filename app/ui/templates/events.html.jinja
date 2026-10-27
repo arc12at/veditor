@@ -119,8 +119,7 @@
                 <span class="text-muted">({{ event.duration_days }} day{% if event.duration_days != 1 %}s{% endif %})</span>
               {% endif %}
             {% elif event.start_date %}
-              {{ event.start_date.strftime('%b') }} {{ event.start_date.day }}, {{ event.start_date.year }}
-              <span class="text-muted">(Single Day)</span>
+              From {{ event.start_date.strftime('%b') }} {{ event.start_date.day }}, {{ event.start_date.year }}
             {% elif event.end_date %}
               Until {{ event.end_date.strftime('%b') }} {{ event.end_date.day }}, {{ event.end_date.year }}
             {% else %}

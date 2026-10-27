@@ -1404,6 +1404,8 @@ def test_studio_breadcrumb_links_to_event_and_room(client: TestClient, db_sessio
     assert 'id="talks-scope-title">Main Stage</h1>' in room_page.text
     assert "Main Stage Closing" in room_page.text
     assert "Workshop Hands-On" not in room_page.text
+    assert f'data-event-id="{event.id}"' in room_page.text
+    assert '<option value="Main Stage" selected>Main Stage</option>' in room_page.text
 
     # A talk without a room renders a placeholder instead of a link.
     roomless = client.get(f"/studio/talks/{talks['no_room'].id}")
@@ -1635,7 +1637,7 @@ def test_create_and_edit_event_with_dates(client: TestClient, db_session):
         in resp_edit_invalid.json()["detail"]
     )
 
-    # 6. Events with multi-year date range and end-date only
+    # 6. Events with multi-year date range, end-date only, and start-date only
     ev_multiyear = models.Event(
         name="New Year Festival",
         start_date=date(2026, 12, 30),
@@ -1647,10 +1649,17 @@ def test_create_and_edit_event_with_dates(client: TestClient, db_session):
         end_date=date(2026, 11, 15),
         created_by_user_id=user.id,
     )
-    db_session.add_all([ev_multiyear, ev_endonly])
+    ev_startonly = models.Event(
+        name="Ongoing Conf",
+        start_date=date(2026, 10, 20),
+        created_by_user_id=user.id,
+    )
+    db_session.add_all([ev_multiyear, ev_endonly, ev_startonly])
     db_session.commit()
 
     resp_rendered = client.get("/studio/events")
     assert resp_rendered.status_code == 200
     assert "Dec 30, 2026 – Jan 3, 2027" in resp_rendered.text
     assert "Until Nov 15, 2026" in resp_rendered.text
+    assert "From Oct 20, 2026" in resp_rendered.text
+    assert "(Single Day)" not in resp_rendered.text

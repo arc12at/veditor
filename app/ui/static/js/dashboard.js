@@ -178,6 +178,26 @@ function _setDropzoneFileName(file) {
 
 let _loadRoomDaysSeq = 0;
 
+function _getResolvedEventId() {
+  const modal = document.getElementById('modal-attach-room');
+  if (modal && modal.dataset && modal.dataset.eventId) {
+    const parsed = parseInt(modal.dataset.eventId, 10);
+    if (!isNaN(parsed)) return parsed;
+  }
+  const hiddenInput = document.querySelector('input[name="event_id"]');
+  if (hiddenInput && hiddenInput.value) {
+    const parsed = parseInt(hiddenInput.value, 10);
+    if (!isNaN(parsed)) return parsed;
+  }
+  const quickEventSel = document.getElementById('quick-event-name');
+  const opt = quickEventSel?.options?.[quickEventSel.selectedIndex];
+  if (opt && opt.dataset && opt.dataset.eventId) {
+    const parsed = parseInt(opt.dataset.eventId, 10);
+    if (!isNaN(parsed)) return parsed;
+  }
+  return null;
+}
+
 async function _loadRoomDays(room) {
   const currentSeq = ++_loadRoomDaysSeq;
   const dateSel = document.getElementById('attach-room-date');
@@ -189,8 +209,7 @@ async function _loadRoomDays(room) {
   dateSel.appendChild(initialOpt);
   if (!room || !room.trim()) return;
 
-  const urlParams = new URLSearchParams(window.location.search);
-  const eventId = urlParams.get('event_id');
+  const eventId = _getResolvedEventId();
   let url = `/talks/room/days?room=${encodeURIComponent(room.trim())}`;
   if (eventId) {
     url += `&event_id=${encodeURIComponent(eventId)}`;
@@ -318,10 +337,9 @@ window.submitAttachRoomRecording = async function() {
       fd.append('video_url', urlInput.trim());
     }
 
-    const urlParams = new URLSearchParams(window.location.search);
-    const eventIdParam = urlParams.get('event_id');
-    if (eventIdParam) {
-      fd.append('event_id', eventIdParam);
+    const resolvedEventId = _getResolvedEventId();
+    if (resolvedEventId) {
+      fd.append('event_id', resolvedEventId);
     }
 
     const res = await (window.authFetch || fetch)('/talks/room/attach-recording', {

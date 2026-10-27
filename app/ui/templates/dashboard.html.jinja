@@ -392,7 +392,7 @@
 
 {% if can_attach_room %}
 <!-- ── MODAL: Attach Room Video ─────────────────────────────────── -->
-<dialog id="modal-attach-room" class="v-modal">
+<dialog id="modal-attach-room" class="v-modal"{% if event_id %} data-event-id="{{ event_id }}"{% endif %}>
   <div class="v-modal-card modal-attach-card">
     <div class="v-modal-header">
       <h3 class="v-modal-title">Attach Room Recording</h3>
@@ -411,7 +411,7 @@
             <option value="" disabled selected>No rooms found</option>
           {% else %}
             {% for r in all_rooms %}
-              <option value="{{ r }}">{{ r }}</option>
+              <option value="{{ r }}"{% if room and r == room %} selected{% endif %}>{{ r }}</option>
             {% endfor %}
           {% endif %}
         </select>

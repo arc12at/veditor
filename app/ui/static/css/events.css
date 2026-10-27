@@ -43,16 +43,9 @@
   min-width: 130px;
 }
 
-.event-create-duration-field {
-  max-width: 140px;
-}
-
 @media (max-width: 640px) {
   .event-create-dates {
     flex-direction: column;
-  }
-  .event-create-duration-field {
-    max-width: 100%;
   }
 }
 

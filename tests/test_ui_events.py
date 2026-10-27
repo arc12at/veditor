@@ -1600,6 +1600,8 @@ def test_create_and_edit_event_with_dates(client: TestClient, db_session):
     assert "Oct 25" in resp_list.text
     assert "Oct 27, 2026" in resp_list.text
     assert "(3 days)" in resp_list.text
+    assert 'id="event-duration"' not in resp_list.text
+    assert 'id="edit-event-duration"' not in resp_list.text
 
     # 4. Successful edit of dates
     resp_edit = client.post(

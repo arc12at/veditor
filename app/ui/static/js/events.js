@@ -20,25 +20,17 @@ document.addEventListener('DOMContentLoaded', () => {
       const editExpire = document.getElementById('edit-event-review-window');
       const editStart = document.getElementById('edit-event-start-date');
       const editEnd = document.getElementById('edit-event-end-date');
-      const editDuration = document.getElementById('edit-event-duration');
       if (editForm && editInput) {
         editForm.action = `/studio/events/${id}/edit`;
         editInput.value = name || '';
       }
       if (editStart) editStart.value = startDate;
-      if (editEnd) editEnd.value = endDate;
-      if (editDuration) {
-        if (startDate && endDate) {
-          const sp = startDate.split('-');
-          const ep = endDate.split('-');
-          const d1 = Date.UTC(parseInt(sp[0], 10), parseInt(sp[1], 10) - 1, parseInt(sp[2], 10));
-          const d2 = Date.UTC(parseInt(ep[0], 10), parseInt(ep[1], 10) - 1, parseInt(ep[2], 10));
-          const diff = Math.round((d2 - d1) / (1000 * 60 * 60 * 24)) + 1;
-          editDuration.value = diff >= 1 ? diff : 1;
-        } else if (startDate) {
-          editDuration.value = 1;
+      if (editEnd) {
+        editEnd.value = endDate;
+        if (startDate) {
+          editEnd.min = startDate;
         } else {
-          editDuration.value = '';
+          editEnd.removeAttribute('min');
         }
       }
       if (editExpire) {
@@ -86,78 +78,36 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // ── Date and Duration Sync ─────────────────────────────────────────
-  function wireDateDurationSync(startId, endId, durationId) {
+  // ── Date Range Sync ─────────────────────────────────────────────────
+  function wireDateRangeSync(startId, endId) {
     const startInput = document.getElementById(startId);
     const endInput = document.getElementById(endId);
-    const durationInput = document.getElementById(durationId);
-    if (!startInput || !endInput || !durationInput) return;
+    if (!startInput || !endInput) return;
 
-    function addDays(dateStr, days) {
-      const parts = dateStr.split('-');
-      if (parts.length !== 3) return '';
-      const d = new Date(Date.UTC(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10)));
-      d.setUTCDate(d.getUTCDate() + days);
-      const y = d.getUTCFullYear();
-      const m = String(d.getUTCMonth() + 1).padStart(2, '0');
-      const day = String(d.getUTCDate()).padStart(2, '0');
-      return `${y}-${m}-${day}`;
-    }
-
-    function diffDays(startStr, endStr) {
-      const sp = startStr.split('-');
-      const ep = endStr.split('-');
-      if (sp.length !== 3 || ep.length !== 3) return 0;
-      const d1 = Date.UTC(parseInt(sp[0], 10), parseInt(sp[1], 10) - 1, parseInt(sp[2], 10));
-      const d2 = Date.UTC(parseInt(ep[0], 10), parseInt(ep[1], 10) - 1, parseInt(ep[2], 10));
-      return Math.round((d2 - d1) / (1000 * 60 * 60 * 24)) + 1;
-    }
-
-    startInput.addEventListener('change', () => {
-      const s = startInput.value;
-      const dur = parseInt(durationInput.value, 10);
-      if (s && dur >= 1) {
-        endInput.value = addDays(s, dur - 1);
-      } else if (s && endInput.value) {
-        const diff = diffDays(s, endInput.value);
-        if (diff >= 1) {
-          durationInput.value = diff;
-        } else {
-          endInput.value = s;
-          durationInput.value = 1;
+    function syncMinMax() {
+      if (startInput.value) {
+        endInput.min = startInput.value;
+        if (endInput.value && endInput.value < startInput.value) {
+          endInput.value = startInput.value;
         }
+      } else {
+        endInput.removeAttribute('min');
       }
-    });
+    }
 
+    startInput.addEventListener('change', syncMinMax);
     endInput.addEventListener('change', () => {
-      const s = startInput.value;
-      const e = endInput.value;
-      if (s && e) {
-        const diff = diffDays(s, e);
-        if (diff >= 1) {
-          durationInput.value = diff;
-        } else {
-          startInput.value = e;
-          durationInput.value = 1;
-        }
-      } else if (e && durationInput.value) {
-        const dur = parseInt(durationInput.value, 10);
-        if (dur >= 1) {
-          startInput.value = addDays(e, -(dur - 1));
-        }
+      if (endInput.value && startInput.value && endInput.value < startInput.value) {
+        startInput.value = endInput.value;
+        endInput.min = startInput.value;
       }
     });
 
-    durationInput.addEventListener('input', () => {
-      const dur = parseInt(durationInput.value, 10);
-      if (dur >= 1 && startInput.value) {
-        endInput.value = addDays(startInput.value, dur - 1);
-      }
-    });
+    syncMinMax();
   }
 
-  wireDateDurationSync('event-start-date', 'event-end-date', 'event-duration');
-  wireDateDurationSync('edit-event-start-date', 'edit-event-end-date', 'edit-event-duration');
+  wireDateRangeSync('event-start-date', 'event-end-date');
+  wireDateRangeSync('edit-event-start-date', 'edit-event-end-date');
 
   // ── API Keys Modal Handling ─────────────────────────────────────
   const apiKeysModal = document.getElementById('modal-api-keys');

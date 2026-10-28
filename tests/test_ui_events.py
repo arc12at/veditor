@@ -227,6 +227,38 @@ def test_dashboard_quick_talk_event_selection(client: TestClient, db_session):
     assert "Org2 Private Conference" not in resp_admin.text
 
 
+def test_dashboard_attach_room_event_selection(client: TestClient, db_session):
+    org1 = create_user(db_session, "att_org1@test.com", "organizer")
+    org2 = create_user(db_session, "att_org2@test.com", "organizer")
+
+    # 1. Organizer with no events sees empty events option in attach modal
+    authenticate_client(client, org1)
+    resp_empty = client.get("/studio")
+    assert '<select id="attach-event-select"' in resp_empty.text
+    assert "No events found" in resp_empty.text
+
+    # 2. Add events for org1 and org2
+    event1 = models.Event(name="Org1 Attach Summit", created_by_user_id=org1.id)
+    event2 = models.Event(name="Org2 Other Conf", created_by_user_id=org2.id)
+    db_session.add_all([event1, event2])
+    db_session.commit()
+
+    # 3. Org1 should see <select id="attach-event-select"> with event1, but NOT event2
+    resp_org1 = client.get("/studio")
+    assert '<select id="attach-event-select"' in resp_org1.text
+    assert f'value="{event1.id}"' in resp_org1.text
+    assert "Org1 Attach Summit" in resp_org1.text
+    assert "Org2 Other Conf" not in resp_org1.text
+
+    # 4. When scoped to event1 via query param, event1 is selected in attach modal
+    resp_scoped = client.get(f"/studio?event_id={event1.id}")
+    assert (
+        f'<option value="{event1.id}" data-event-id="{event1.id}" selected>Org1 Attach Summit</option>'
+        in resp_scoped.text
+    )
+    assert '<select id="attach-room-select"' in resp_scoped.text
+
+
 def test_events_page_renders_clickable_name_and_action_buttons(
     client: TestClient, db_session
 ):

@@ -177,8 +177,18 @@ function _setDropzoneFileName(file) {
 }
 
 let _loadRoomDaysSeq = 0;
+let _loadAttachRoomsSeq = 0;
 
 function _getResolvedEventId() {
+  const attachEventSel = document.getElementById('attach-event-select');
+  if (attachEventSel) {
+    const opt = attachEventSel.options?.[attachEventSel.selectedIndex];
+    const rawId = opt?.dataset?.eventId || attachEventSel.value;
+    if (rawId) {
+      const parsed = parseInt(rawId, 10);
+      if (!isNaN(parsed)) return parsed;
+    }
+  }
   const modal = document.getElementById('modal-attach-room');
   if (modal && modal.dataset && modal.dataset.eventId) {
     const parsed = parseInt(modal.dataset.eventId, 10);
@@ -189,13 +199,56 @@ function _getResolvedEventId() {
     const parsed = parseInt(hiddenInput.value, 10);
     if (!isNaN(parsed)) return parsed;
   }
-  const quickEventSel = document.getElementById('quick-event-name');
-  const opt = quickEventSel?.options?.[quickEventSel.selectedIndex];
-  if (opt && opt.dataset && opt.dataset.eventId) {
-    const parsed = parseInt(opt.dataset.eventId, 10);
-    if (!isNaN(parsed)) return parsed;
-  }
   return null;
+}
+
+async function _loadAttachRooms(eventId, selectedRoom = '') {
+  const currentSeq = ++_loadAttachRoomsSeq;
+  const roomSel = document.getElementById('attach-room-select');
+  if (!roomSel) return;
+
+  if (!eventId) {
+    roomSel.replaceChildren(new Option('No rooms found', ''));
+    roomSel.disabled = true;
+    _loadRoomDays('');
+    return;
+  }
+
+  try {
+    const res = await (window.authFetch || fetch)(`/events/${eventId}/rooms`);
+    if (currentSeq !== _loadAttachRoomsSeq) return;
+    if (!res.ok) throw new Error('Unable to load rooms');
+    const rooms = await res.json();
+    if (currentSeq !== _loadAttachRoomsSeq) return;
+
+    roomSel.replaceChildren();
+    if (!Array.isArray(rooms) || rooms.length === 0) {
+      roomSel.replaceChildren(new Option('No rooms found', ''));
+      roomSel.disabled = true;
+      _loadRoomDays('');
+    } else {
+      rooms.forEach(r => {
+        const opt = new Option(r.name, r.name);
+        roomSel.add(opt);
+      });
+      if (selectedRoom && [...roomSel.options].some(o => o.value === selectedRoom)) {
+        roomSel.value = selectedRoom;
+      } else {
+        roomSel.selectedIndex = 0;
+      }
+      roomSel.disabled = false;
+      _loadRoomDays(roomSel.value);
+    }
+  } catch (_) {
+    if (currentSeq !== _loadAttachRoomsSeq) return;
+    if (roomSel.options.length === 0) {
+      roomSel.replaceChildren(new Option('No rooms found', ''));
+      roomSel.disabled = true;
+      _loadRoomDays('');
+    } else if (roomSel.value) {
+      _loadRoomDays(roomSel.value);
+    }
+  }
 }
 
 async function _loadRoomDays(room) {
@@ -273,9 +326,13 @@ function _updateAttachSubmitLabel() {
 }
 
 function _initAttachRoomModal() {
+  const eventId = _getResolvedEventId();
   const roomSel = document.getElementById('attach-room-select') || document.getElementById('attach-room-input');
-  if (roomSel && roomSel.value) {
-    _loadRoomDays(roomSel.value);
+  const currentRoom = (roomSel && roomSel.value) ? roomSel.value : '';
+  if (eventId) {
+    _loadAttachRooms(eventId, currentRoom);
+  } else if (currentRoom) {
+    _loadRoomDays(currentRoom);
   }
   _setAttachSourceMode('url');
   _updateAttachSubmitLabel();
@@ -824,6 +881,27 @@ document.addEventListener('DOMContentLoaded', () => {
   if (btnSubmitAttach) btnSubmitAttach.addEventListener('click', window.submitAttachRoomRecording);
 
   // Attach Room Recording UI listeners
+  const attachEventSelect = document.getElementById('attach-event-select');
+  if (attachEventSelect) {
+    attachEventSelect.addEventListener('change', () => {
+      const eventId = _getResolvedEventId();
+      const modal = document.getElementById('modal-attach-room');
+      if (modal) {
+        if (eventId) {
+          modal.dataset.eventId = String(eventId);
+        } else {
+          delete modal.dataset.eventId;
+        }
+      }
+      const roomSel = document.getElementById('attach-room-select');
+      if (roomSel) {
+        roomSel.replaceChildren(new Option('Loading rooms...', ''));
+        roomSel.disabled = true;
+      }
+      _loadAttachRooms(eventId);
+    });
+  }
+
   const roomSelect = document.getElementById('attach-room-select');
   if (roomSelect) {
     roomSelect.addEventListener('change', () => {

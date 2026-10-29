@@ -788,6 +788,11 @@ def request_organizer_role(
 
     requested_at = datetime.now(UTC)
     note_val = (payload.note or "").strip() or None
+    if note_val and len(note_val) < 20:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Note must be at least 20 characters.",
+        )
 
     rows_updated = (
         db.query(models.User)

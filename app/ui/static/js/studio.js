@@ -1783,12 +1783,27 @@ function initOrganizerRequest() {
   if (noteInput && noteChars) {
     noteInput.addEventListener('input', () => {
       noteChars.textContent = `${noteInput.value.length} / 500`;
+      if (errorEl && !errorEl.classList.contains('hidden')) {
+        const val = noteInput.value.trim();
+        if (val.length === 0 || val.length >= 20) {
+          errorEl.textContent = '';
+          errorEl.classList.add('hidden');
+        }
+      }
     });
   }
 
   if (btnSubmit) {
     btnSubmit.addEventListener('click', async () => {
       if (errorEl) { errorEl.textContent = ''; errorEl.classList.add('hidden'); }
+      const trimmedNote = noteInput ? noteInput.value.trim() : '';
+      if (trimmedNote.length > 0 && trimmedNote.length < 20) {
+        if (errorEl) {
+          errorEl.textContent = 'Note must be at least 20 characters.';
+          errorEl.classList.remove('hidden');
+        }
+        return;
+      }
       btnSubmit.disabled = true;
       btnSubmit.textContent = 'Submitting…';
       try {
@@ -1796,7 +1811,7 @@ function initOrganizerRequest() {
         const resp = await fetchFn('/users/request-organizer', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ note: noteInput ? noteInput.value.trim() : '' }),
+          body: JSON.stringify({ note: trimmedNote }),
         });
         let data = {};
         try {
@@ -1825,9 +1840,12 @@ function initOrganizerRequest() {
             `;
           }
         } else {
-          const msg = (typeof data.detail === 'string' && data.detail.trim())
-            ? data.detail
-            : 'Failed to submit request. Please try again.';
+          let msg = 'Failed to submit request. Please try again.';
+          if (typeof data.detail === 'string' && data.detail.trim()) {
+            msg = data.detail;
+          } else if (Array.isArray(data.detail) && data.detail[0]?.msg) {
+            msg = data.detail[0].msg.replace(/^Value error,\s*/i, '');
+          }
           if (errorEl) { errorEl.textContent = msg; errorEl.classList.remove('hidden'); }
           btnSubmit.disabled = false;
           btnSubmit.textContent = 'Submit Request';

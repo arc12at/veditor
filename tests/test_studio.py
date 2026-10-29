@@ -3713,6 +3713,9 @@ def test_talk_studio_organizer_request_prompt(client: TestClient, db_session):
     assert "modal-request-organizer" in res.text
     assert "Request Organizer Role" in res.text
     assert "Organizer Privileges Required" in res.text
+    assert 'maxlength="500"' in res.text
+    assert "0 / 500" in res.text
+    assert 'class="input-field"' in res.text
 
     # 2. Standard user with pending request sees pending banner
     user.organizer_requested = True
@@ -3771,6 +3774,28 @@ def test_talk_studio_organizer_request_prompt(client: TestClient, db_session):
     assert res_sso.status_code == 200
     assert "btn-request-organizer" not in res_sso.text
     assert "modal-request-organizer" not in res_sso.text
+
+
+def test_dashboard_organizer_request_modal(client: TestClient, db_session):
+    """Standard user sees redesigned organizer request modal on talks dashboard."""
+    user = models.User(
+        email=f"dash_user_{uuid.uuid4().hex[:8]}@example.com",
+        hashed_password="hash",
+        role="user",
+        organizer_requested=False,
+    )
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+
+    token = create_session_token(user.id, user.role)
+    client.cookies.set("veditor_session", token)
+    res = client.get("/studio")
+    assert res.status_code == 200
+    assert "modal-request-organizer" in res.text
+    assert 'maxlength="500"' in res.text
+    assert "0 / 500" in res.text
+    assert 'class="input-field"' in res.text
 
 
 def test_check_talk_access_persists_promoted_speaker_role(db_session):

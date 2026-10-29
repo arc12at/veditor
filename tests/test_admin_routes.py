@@ -1667,6 +1667,22 @@ def test_request_organizer_note_exceeding_max_length_rejected(
     assert res.status_code == 422
 
 
+def test_request_organizer_note_minimum_length(client: TestClient, db_session):
+    """Note under 20 characters is rejected; 20-500 characters is accepted."""
+    user = _create_test_user(db_session, "req_org_min@admin-test.com", role="user")
+    token = create_session_token(user.id, user.role)
+    client.cookies.set("veditor_session", token)
+
+    # Note shorter than 20 characters rejected
+    res_short = client.post("/users/request-organizer", json={"note": "a" * 19})
+    assert res_short.status_code == 422
+
+    # Exactly 20 characters accepted
+    res_min = client.post("/users/request-organizer", json={"note": "a" * 20})
+    assert res_min.status_code == 200
+    assert res_min.json()["organizer_request_note"] == "a" * 20
+
+
 def test_admin_approve_clears_pending_request(client: TestClient, db_session):
     """Admin promoting a user to organizer clears the pending request flag."""
     admin = _create_test_user(db_session, "admin_appv@admin-test.com", role="admin")

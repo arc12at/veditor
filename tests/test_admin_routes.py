@@ -1676,11 +1676,50 @@ def test_request_organizer_note_minimum_length(client: TestClient, db_session):
     # Note shorter than 20 characters rejected
     res_short = client.post("/users/request-organizer", json={"note": "a" * 19})
     assert res_short.status_code == 422
+    assert "Note must be at least 20 characters." in res_short.json()["detail"]
+
+    # Trailing whitespace does not inflate length beyond stripped requirement
+    res_ws = client.post(
+        "/users/request-organizer", json={"note": "   " + "a" * 19 + "   "}
+    )
+    assert res_ws.status_code == 422
 
     # Exactly 20 characters accepted
     res_min = client.post("/users/request-organizer", json={"note": "a" * 20})
     assert res_min.status_code == 200
     assert res_min.json()["organizer_request_note"] == "a" * 20
+
+
+def test_request_organizer_note_unicode_code_point_validation(
+    client: TestClient, db_session
+):
+    """Supplementary Unicode characters (e.g. emoji) are counted by code point."""
+    user = _create_test_user(db_session, "req_org_unicode@admin-test.com", role="user")
+    token = create_session_token(user.id, user.role)
+    client.cookies.set("veditor_session", token)
+
+    # 10 emoji (20 UTF-16 code units, but only 10 Unicode code points) is rejected (< 20)
+    res_short_emoji = client.post("/users/request-organizer", json={"note": "🚀" * 10})
+    assert res_short_emoji.status_code == 422
+    assert "Note must be at least 20 characters." in res_short_emoji.json()["detail"]
+
+    # 20 emoji (20 code points) is accepted
+    res_valid_emoji = client.post("/users/request-organizer", json={"note": "🚀" * 20})
+    assert res_valid_emoji.status_code == 200
+    assert res_valid_emoji.json()["organizer_request_note"] == "🚀" * 20
+
+
+def test_request_organizer_openapi_contract(client: TestClient):
+    """OpenAPI contract documents the minimum and maximum note length requirements."""
+    res = client.get("/openapi.json")
+    assert res.status_code == 200
+    schema = res.json()
+    post_op = schema["paths"]["/users/request-organizer"]["post"]
+    assert "at least 20 characters" in post_op["description"]
+    note_prop = schema["components"]["schemas"]["OrganizerRequestCreate"]["properties"][
+        "note"
+    ]
+    assert "at least 20 characters" in note_prop["description"]
 
 
 def test_admin_approve_clears_pending_request(client: TestClient, db_session):

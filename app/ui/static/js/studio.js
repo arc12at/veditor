@@ -1764,6 +1764,10 @@ function initOrganizerRequest() {
 
   if (!btnRequest || !modal) return;
 
+  function getCodePoints(str) {
+    return Array.from(str || '');
+  }
+
   function openModal() {
     if (noteInput) noteInput.value = '';
     if (noteChars) noteChars.textContent = '0 / 500';
@@ -1782,10 +1786,15 @@ function initOrganizerRequest() {
 
   if (noteInput && noteChars) {
     noteInput.addEventListener('input', () => {
-      noteChars.textContent = `${noteInput.value.length} / 500`;
+      const codePoints = getCodePoints(noteInput.value);
+      if (codePoints.length > 500) {
+        noteInput.value = codePoints.slice(0, 500).join('');
+      }
+      const untrimmedCount = getCodePoints(noteInput.value).length;
+      noteChars.textContent = `${untrimmedCount} / 500`;
       if (errorEl && !errorEl.classList.contains('hidden')) {
-        const val = noteInput.value.trim();
-        if (val.length === 0 || val.length >= 20) {
+        const trimmedCount = getCodePoints(noteInput.value.trim()).length;
+        if (trimmedCount === 0 || trimmedCount >= 20) {
           errorEl.textContent = '';
           errorEl.classList.add('hidden');
         }
@@ -1797,9 +1806,18 @@ function initOrganizerRequest() {
     btnSubmit.addEventListener('click', async () => {
       if (errorEl) { errorEl.textContent = ''; errorEl.classList.add('hidden'); }
       const trimmedNote = noteInput ? noteInput.value.trim() : '';
-      if (trimmedNote.length > 0 && trimmedNote.length < 20) {
+      const trimmedCount = getCodePoints(trimmedNote).length;
+      if (trimmedCount > 0 && trimmedCount < 20) {
         if (errorEl) {
           errorEl.textContent = 'Note must be at least 20 characters.';
+          errorEl.classList.remove('hidden');
+        }
+        return;
+      }
+      const rawCount = getCodePoints(noteInput ? noteInput.value : '').length;
+      if (rawCount > 500) {
+        if (errorEl) {
+          errorEl.textContent = 'Note must be at most 500 characters.';
           errorEl.classList.remove('hidden');
         }
         return;

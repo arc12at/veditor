@@ -752,13 +752,31 @@ def verify_email_resend_submit(
     )
 
 
-@router.post("/users/request-organizer", response_model=schemas.UserRead)
+@router.post(
+    "/users/request-organizer",
+    response_model=schemas.UserRead,
+    summary="Request organizer role elevation",
+    description=(
+        "Allow a standard user to request organizer role elevation. "
+        "An optional justification note may be provided. If non-empty, "
+        "the note must contain at least 20 characters and at most 500 characters."
+    ),
+    responses={
+        status.HTTP_422_UNPROCESSABLE_CONTENT: {
+            "description": "Validation error: non-empty note is shorter than 20 characters or exceeds 500 characters.",
+        },
+    },
+)
 def request_organizer_role(
     payload: schemas.OrganizerRequestCreate,
     request: Request,
     db: Annotated[Session, Depends(get_db)],
 ):
-    """Allow a standard user to request organizer role elevation."""
+    """Allow a standard user to request organizer role elevation.
+
+    An optional justification note may be provided. If non-empty, the note
+    must be at least 20 characters and at most 500 characters.
+    """
     cookie_token = request.cookies.get("veditor_session")
     if (
         cookie_token and decode_sso_token(cookie_token) is not None

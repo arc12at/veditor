@@ -1695,3 +1695,78 @@ def test_create_and_edit_event_with_dates(client: TestClient, db_session):
     assert "Until Nov 15, 2026" in resp_rendered.text
     assert "From Oct 20, 2026" in resp_rendered.text
     assert "(Single Day)" not in resp_rendered.text
+
+
+def test_studio_event_timezone_create_edit_and_rendering(
+    client: TestClient, db_session
+):
+    """Verify Studio create/edit forms support timezone selection and validation."""
+    user = create_user(db_session, "tz_organizer@example.com", "organizer")
+    authenticate_client(client, user)
+
+    # 1. Page renders timezone dropdowns in create form and edit modal
+    resp_page = client.get("/studio/events")
+    assert resp_page.status_code == 200
+    assert 'id="event-timezone"' in resp_page.text
+    assert 'name="timezone"' in resp_page.text
+    assert 'id="edit-event-timezone"' in resp_page.text
+    assert '<option value="Asia/Singapore">Asia/Singapore</option>' in resp_page.text
+
+    # 2. Creating event with valid timezone
+    resp_create = client.post(
+        "/studio/events",
+        data={
+            "name": "Tokyo Summit 2026",
+            "timezone": "Asia/Tokyo",
+        },
+        follow_redirects=False,
+    )
+    assert resp_create.status_code == 303
+    event = (
+        db_session.query(models.Event)
+        .filter(models.Event.name == "Tokyo Summit 2026")
+        .first()
+    )
+    assert event is not None
+    assert event.timezone == "Asia/Tokyo"
+
+    # 3. Timezone is rendered in table and in data-event-timezone on edit button
+    resp_list = client.get("/studio/events")
+    assert resp_list.status_code == 200
+    assert "Asia/Tokyo" in resp_list.text
+    assert 'data-event-timezone="Asia/Tokyo"' in resp_list.text
+
+    # 4. Editing event to update timezone
+    resp_edit = client.post(
+        f"/studio/events/{event.id}/edit",
+        data={
+            "name": "Tokyo Summit 2026 (Updated)",
+            "timezone": "America/New_York",
+        },
+        follow_redirects=False,
+    )
+    assert resp_edit.status_code == 303
+    db_session.refresh(event)
+    assert event.timezone == "America/New_York"
+
+    # 5. Invalid timezone on create renders error in page (HTTP 400)
+    resp_invalid_create = client.post(
+        "/studio/events",
+        data={
+            "name": "Bad TZ Event",
+            "timezone": "Asia/Singapur",
+        },
+    )
+    assert resp_invalid_create.status_code == 400
+    assert "Invalid timezone" in resp_invalid_create.text
+
+    # 6. Invalid timezone on edit returns HTTP 400
+    resp_invalid_edit = client.post(
+        f"/studio/events/{event.id}/edit",
+        data={
+            "name": "Tokyo Summit 2026 (Updated)",
+            "timezone": "Asia/Singapur",
+        },
+    )
+    assert resp_invalid_edit.status_code == 400
+    assert "Invalid timezone" in resp_invalid_edit.json()["detail"]

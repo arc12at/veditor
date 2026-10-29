@@ -1416,3 +1416,73 @@ def test_event_create_and_patch_dates(mock_db):
         json={"end_date": "2026-10-20"},
     )
     assert res_invalid_patch.status_code == 400
+
+
+def test_event_timezone_validation_create_and_update(mock_db):
+    """Verify that unknown timezones return 422 while valid IANA timezones succeed."""
+    app.dependency_overrides[get_db] = lambda: mock_db
+    mock_user = models.User(id=5, email="organizer@example.com", role="organizer")
+    app.dependency_overrides[get_current_user] = lambda: CurrentUser(
+        user_id=5, role="organizer", source="cookie", user=mock_user
+    )
+
+    mock_event = models.Event(
+        id=102,
+        name="Timezone Event",
+        created_by_user_id=5,
+        timezone="UTC",
+    )
+    mock_db.query.return_value.filter.return_value.first.return_value = mock_event
+
+    # 0. Direct schema validation
+    with pytest.raises(ValueError, match="Unknown or invalid timezone"):
+        schemas.EventCreate(name="Invalid TZ", timezone="Asia/Singapur")
+
+    with pytest.raises(ValueError, match="Unknown or invalid timezone"):
+        schemas.EventUpdate(timezone="Asia/Singapur")
+
+    # 1. Invalid timezone on create returns 422
+    res_invalid_create = client.post(
+        "/events",
+        json={
+            "name": "Invalid TZ Event",
+            "timezone": "Asia/Singapur",
+        },
+    )
+    assert res_invalid_create.status_code == 422
+    assert "timezone" in str(res_invalid_create.json()["detail"])
+
+    # 2. Valid timezone on create succeeds
+    res_valid_create = client.post(
+        "/events",
+        json={
+            "name": "Singapore Summit",
+            "timezone": "Asia/Singapore",
+        },
+    )
+    assert res_valid_create.status_code == 201
+    assert res_valid_create.json()["timezone"] == "Asia/Singapore"
+
+    # 3. Invalid timezone on update returns 422
+    res_invalid_update = client.patch(
+        "/events/102",
+        json={"timezone": "Invalid/Zone"},
+    )
+    assert res_invalid_update.status_code == 422
+    assert "timezone" in str(res_invalid_update.json()["detail"])
+
+    # 4. Valid timezone on update succeeds
+    res_valid_update = client.patch(
+        "/events/102",
+        json={"timezone": "America/New_York"},
+    )
+    assert res_valid_update.status_code == 200
+    assert mock_event.timezone == "America/New_York"
+
+    # 5. Clearing timezone with None or empty string succeeds
+    res_clear_tz = client.patch(
+        "/events/102",
+        json={"timezone": None},
+    )
+    assert res_clear_tz.status_code == 200
+    assert mock_event.timezone is None

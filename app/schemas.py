@@ -4,6 +4,7 @@ from decimal import Decimal
 from enum import Enum
 from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import (
     BaseModel,
@@ -17,6 +18,19 @@ from pydantic import (
 from app.retention import validate_retention_overrides
 
 StrictPositiveInt = Annotated[int, Field(strict=True, gt=0)]
+
+
+def validate_timezone(v: str | None) -> str | None:
+    if v is None:
+        return None
+    cleaned = v.strip()
+    if not cleaned:
+        return None
+    try:
+        ZoneInfo(cleaned)
+    except (ZoneInfoNotFoundError, ValueError, KeyError) as exc:
+        raise ValueError(f"Unknown or invalid timezone: '{v}'") from exc
+    return cleaned
 
 
 class EventBase(BaseModel):
@@ -35,6 +49,11 @@ class EventBase(BaseModel):
         cls, v: dict[str, Any] | None
     ) -> dict[str, Any] | None:
         return validate_retention_overrides(v)
+
+    @field_validator("timezone")
+    @classmethod
+    def _validate_timezone(cls, v: str | None) -> str | None:
+        return validate_timezone(v)
 
     @model_validator(mode="after")
     def _validate_dates(self):
@@ -63,6 +82,11 @@ class EventUpdate(BaseModel):
         cls, v: dict[str, Any] | None
     ) -> dict[str, Any] | None:
         return validate_retention_overrides(v)
+
+    @field_validator("timezone")
+    @classmethod
+    def _validate_timezone(cls, v: str | None) -> str | None:
+        return validate_timezone(v)
 
     @model_validator(mode="after")
     def _validate_dates(self):

@@ -127,7 +127,9 @@ document.addEventListener('DOMContentLoaded', () => {
       const expireHours = btn.getAttribute('data-event-expire-hours') || '';
       const startDate = btn.getAttribute('data-event-start-date') || '';
       const endDate = btn.getAttribute('data-event-end-date') || '';
+      const timezone = btn.getAttribute('data-event-timezone') || '';
       const editExpire = document.getElementById('edit-event-review-window');
+      const editTimezone = document.getElementById('edit-event-timezone');
       const editStart = document.getElementById('edit-event-start-date');
       const editEnd = document.getElementById('edit-event-end-date');
       if (editForm && editInput) {
@@ -142,6 +144,15 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
           editEnd.removeAttribute('min');
         }
+      }
+      if (editTimezone) {
+        if (timezone && !editTimezone.querySelector(`option[value="${timezone}"]`)) {
+          const opt = document.createElement('option');
+          opt.value = timezone;
+          opt.textContent = timezone;
+          editTimezone.appendChild(opt);
+        }
+        editTimezone.value = timezone;
       }
       if (editExpire) {
         if (expireHours && !editExpire.querySelector(`option[value="${expireHours}"]`)) {

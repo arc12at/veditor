@@ -56,6 +56,19 @@
         </div>
       </div>
       <div class="event-create-field">
+        <label for="event-timezone" class="event-create-label">Timezone</label>
+        <select
+          id="event-timezone"
+          name="timezone"
+          class="input-field"
+        >
+          <option value="" selected>Default (UTC)</option>
+          {% for tz in available_timezones %}
+            <option value="{{ tz }}">{{ tz }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="event-create-field">
         <label for="event-review-window" class="event-create-label">Speaker Review Window</label>
         <select
           id="event-review-window"
@@ -125,6 +138,9 @@
             {% else %}
               <span class="text-muted">—</span>
             {% endif %}
+            {% if event.timezone %}
+              <span class="event-tz-badge">{{ event.timezone }}</span>
+            {% endif %}
           </td>
           <td>
             {% if event.created_by_user %}
@@ -153,7 +169,7 @@
               <button type="button" class="btn btn-ghost btn-sm btn-manage-rooms" data-event-id="{{ event.id }}" data-event-name="{{ event.name }}" title="Manage Rooms">
                 Rooms
               </button>
-              <button type="button" class="btn btn-ghost btn-sm btn-edit-event" data-event-id="{{ event.id }}" data-event-name="{{ event.name }}" data-event-expire-hours="{{ event.speaker_magic_link_expire_hours or '' }}" data-event-start-date="{{ event.start_date.isoformat() if event.start_date else '' }}" data-event-end-date="{{ event.end_date.isoformat() if event.end_date else '' }}" title="Edit Event">
+              <button type="button" class="btn btn-ghost btn-sm btn-edit-event" data-event-id="{{ event.id }}" data-event-name="{{ event.name }}" data-event-expire-hours="{{ event.speaker_magic_link_expire_hours or '' }}" data-event-start-date="{{ event.start_date.isoformat() if event.start_date else '' }}" data-event-end-date="{{ event.end_date.isoformat() if event.end_date else '' }}" data-event-timezone="{{ event.timezone or '' }}" title="Edit Event">
                 Edit
               </button>
               <button type="button" class="btn btn-ghost btn-sm btn-delete-event btn-danger-ghost" data-event-id="{{ event.id }}" data-event-name="{{ event.name }}" title="Delete Event">
@@ -210,6 +226,19 @@
               >
             </div>
           </div>
+        </div>
+        <div class="events-modal-field">
+          <label for="edit-event-timezone" class="event-create-label">Timezone</label>
+          <select
+            id="edit-event-timezone"
+            name="timezone"
+            class="input-field"
+          >
+            <option value="">Default (UTC)</option>
+            {% for tz in available_timezones %}
+              <option value="{{ tz }}">{{ tz }}</option>
+            {% endfor %}
+          </select>
         </div>
         <div class="events-modal-field">
           <label for="edit-event-review-window" class="event-create-label">Speaker Review Window</label>

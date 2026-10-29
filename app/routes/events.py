@@ -59,6 +59,7 @@ def create_event(
         speaker_magic_link_expire_hours=payload.speaker_magic_link_expire_hours,
         start_date=payload.start_date,
         end_date=payload.end_date,
+        timezone=payload.timezone,
         created_by_user_id=created_by,
     )
     db.add(event)
@@ -299,6 +300,8 @@ def update_event(
         event.start_date = payload.start_date
     if "end_date" in fields_set:
         event.end_date = payload.end_date
+    if "timezone" in fields_set:
+        event.timezone = payload.timezone
 
     db.commit()
     db.refresh(event)

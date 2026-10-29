@@ -1,5 +1,6 @@
 from datetime import UTC, date, datetime
 from typing import Any, Self
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import (
     Boolean,
@@ -144,6 +145,9 @@ class Event(Base):
     )
     start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    timezone: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, default=None
+    )
     created_by_user_id: Mapped[int | None] = mapped_column(
         ForeignKey(
             "users.id",
@@ -172,6 +176,16 @@ class Event(Base):
         if self.start_date and self.end_date:
             return max(1, (self.end_date - self.start_date).days + 1)
         return 1
+
+    @property
+    def event_tz(self) -> ZoneInfo:
+        """Return the event's ZoneInfo, falling back to UTC if unset or invalid."""
+        if self.timezone:
+            try:
+                return ZoneInfo(self.timezone)
+            except ZoneInfoNotFoundError, KeyError:
+                pass
+        return UTC
 
     @property
     def is_eventyay_synced(self) -> bool:

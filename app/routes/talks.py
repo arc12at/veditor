@@ -8,6 +8,7 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import ROUND_CEILING, Decimal
 from pathlib import Path
 from typing import Annotated
+from zoneinfo import ZoneInfo
 
 import anyio.to_thread
 import av
@@ -204,6 +205,14 @@ def create_or_update_talk(
         return talk
 
 
+def _talk_local_date(talk: models.Talk, tz: ZoneInfo) -> date:
+    """Return the calendar date of a talk's start time in the given timezone."""
+    dt = talk.start
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(tz).date()
+
+
 @router.get("/room/days")
 def get_room_days(
     room: str,
@@ -248,6 +257,9 @@ def get_room_days(
             )
         event_id = matching_events[0].id
 
+    event = db.query(models.Event).filter(models.Event.id == event_id).first()
+    tz = event.event_tz
+
     talks = (
         db.query(models.Talk)
         .filter(models.Talk.event_id == event_id, models.Talk.room == room)
@@ -257,11 +269,11 @@ def get_room_days(
 
     days_map: dict[date, list[models.Talk]] = {}
     for t in talks:
-        d = t.start.date()
+        d = _talk_local_date(t, tz)
         days_map.setdefault(d, []).append(t)
 
     result = []
-    for idx, (d, day_talks) in enumerate(days_map.items(), 1):
+    for d, day_talks in sorted(days_map.items()):
         total_count = len(day_talks)
         waiting_count = sum(
             1
@@ -269,10 +281,17 @@ def get_room_days(
             if t.status in ("waiting_for_files", "detecting", "broken")
         )
         formatted_date = f"{d.strftime('%b')} {d.day}, {d.year}"
-        label = f"Day {idx}: {formatted_date} ({total_count} session{'s' if total_count != 1 else ''})"
+        # Compute day number from the event's start_date so the label matches
+        # the event schedule rather than the room's own session index.
+        if event.start_date is not None:
+            day_number = (d - event.start_date).days + 1
+            label = f"Day {day_number}: {formatted_date} ({total_count} session{'s' if total_count != 1 else ''})"
+        else:
+            day_number = None
+            label = f"{formatted_date} ({total_count} session{'s' if total_count != 1 else ''})"
         result.append(
             {
-                "day_number": idx,
+                "day_number": day_number,
                 "date": d.isoformat(),
                 "formatted_date": formatted_date,
                 "session_count": total_count,
@@ -2061,6 +2080,9 @@ async def attach_room_recording(
         event_id = matching_events[0].id
 
     # Query talks in this room and event
+    event = db.query(models.Event).filter(models.Event.id == event_id).first()
+    tz = event.event_tz
+
     all_room_talks = (
         db.query(models.Talk)
         .filter(models.Talk.event_id == event_id, models.Talk.room == room)
@@ -2073,16 +2095,18 @@ async def attach_room_recording(
             detail=f"No talks found in room '{room}' for event {event_id}",
         )
 
-    distinct_days = sorted({t.start.date() for t in all_room_talks})
+    distinct_days = sorted({_talk_local_date(t, tz) for t in all_room_talks})
     if target_date is not None:
         eligible_talks = [
             t
             for t in all_room_talks
-            if t.start.date() == target_date
+            if _talk_local_date(t, tz) == target_date
             and t.status in ("waiting_for_files", "detecting", "broken")
         ]
         if not eligible_talks:
-            day_talks = [t for t in all_room_talks if t.start.date() == target_date]
+            day_talks = [
+                t for t in all_room_talks if _talk_local_date(t, tz) == target_date
+            ]
             if not day_talks:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,

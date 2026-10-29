@@ -27,6 +27,7 @@ class EventBase(BaseModel):
     speaker_magic_link_expire_hours: StrictPositiveInt | None = None
     start_date: date | None = None
     end_date: date | None = None
+    timezone: str | None = None
 
     @field_validator("retention_overrides")
     @classmethod
@@ -54,6 +55,7 @@ class EventUpdate(BaseModel):
     speaker_magic_link_expire_hours: StrictPositiveInt | None = None
     start_date: date | None = None
     end_date: date | None = None
+    timezone: str | None = None
 
     @field_validator("retention_overrides")
     @classmethod

@@ -1,7 +1,7 @@
 import json
 import re
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -3960,7 +3960,7 @@ def test_talk_speaker_email_index():
 
 
 def test_room_days_and_targeted_multi_day_room_attachment(client, db_session):
-    event = models.Event(name="Multi-Day Conf")
+    event = models.Event(name="Multi-Day Conf", start_date=date(2026, 10, 25))
     db_session.add(event)
     db_session.commit()
 
@@ -4081,3 +4081,145 @@ def test_room_days_and_targeted_multi_day_room_attachment(client, db_session):
     )
     assert res_non_string_json_date.status_code == 400
     assert "Invalid target_date format" in res_non_string_json_date.json()["detail"]
+
+
+def test_room_days_day_numbering_relative_to_event_start(client, db_session):
+    """Verify Day numbering matches event schedule even if room has sessions only on later days."""
+    # Event starts on Oct 24, but room only has sessions on Oct 25 (Day 2) and Oct 26 (Day 3)
+    event = models.Event(
+        name="Scheduled Summit",
+        start_date=date(2026, 10, 24),
+        end_date=date(2026, 10, 26),
+    )
+    db_session.add(event)
+    db_session.commit()
+
+    t_day2 = models.Talk(
+        event_id=event.id,
+        title="Late Room Talk Day 2",
+        room="Hall B",
+        start=datetime(2026, 10, 25, 10, 0, tzinfo=UTC),
+        end=datetime(2026, 10, 25, 11, 0, tzinfo=UTC),
+        status="waiting_for_files",
+    )
+    t_day3 = models.Talk(
+        event_id=event.id,
+        title="Late Room Talk Day 3",
+        room="Hall B",
+        start=datetime(2026, 10, 26, 10, 0, tzinfo=UTC),
+        end=datetime(2026, 10, 26, 11, 0, tzinfo=UTC),
+        status="waiting_for_files",
+    )
+    db_session.add_all([t_day2, t_day3])
+    db_session.commit()
+
+    api_key = f"key_{uuid.uuid4().hex}"
+    client_model = models.Client(hashed_key=hash_api_key(api_key), event_ids=[event.id])
+    db_session.add(client_model)
+    db_session.commit()
+
+    resp = client.get(
+        f"/talks/room/days?room=Hall%20B&event_id={event.id}",
+        headers={"X-API-Key": api_key},
+    )
+    assert resp.status_code == 200
+    days = resp.json()
+    assert len(days) == 2
+    # Even though Oct 25 is the 1st day for Hall B, it must be labeled Day 2
+    assert days[0]["day_number"] == 2
+    assert "Day 2: Oct 25, 2026" in days[0]["label"]
+    # Oct 26 must be labeled Day 3
+    assert days[1]["day_number"] == 3
+    assert "Day 3: Oct 26, 2026" in days[1]["label"]
+
+
+def test_room_days_without_event_start_date(client, db_session):
+    """Verify that if event has no start_date, Day N is omitted from labels."""
+    event = models.Event(name="Dateless Event", start_date=None)
+    db_session.add(event)
+    db_session.commit()
+
+    t1 = models.Talk(
+        event_id=event.id,
+        title="Dateless Talk",
+        room="Hall C",
+        start=datetime(2026, 10, 25, 10, 0, tzinfo=UTC),
+        end=datetime(2026, 10, 25, 11, 0, tzinfo=UTC),
+        status="waiting_for_files",
+    )
+    db_session.add(t1)
+    db_session.commit()
+
+    api_key = f"key_{uuid.uuid4().hex}"
+    client_model = models.Client(hashed_key=hash_api_key(api_key), event_ids=[event.id])
+    db_session.add(client_model)
+    db_session.commit()
+
+    resp = client.get(
+        f"/talks/room/days?room=Hall%20C&event_id={event.id}",
+        headers={"X-API-Key": api_key},
+    )
+    assert resp.status_code == 200
+    days = resp.json()
+    assert len(days) == 1
+    assert days[0]["day_number"] is None
+    assert "Day" not in days[0]["label"]
+    assert days[0]["label"] == "Oct 25, 2026 (1 session)"
+
+
+def test_room_days_and_attachment_with_event_timezone(client, db_session):
+    """Verify talk dates are computed using the event's timezone, not UTC."""
+    # 2026-10-25 22:00:00 UTC is 2026-10-26 07:00:00 in Asia/Tokyo (UTC+9)
+    event = models.Event(
+        name="Tokyo Summit",
+        timezone="Asia/Tokyo",
+        start_date=date(2026, 10, 26),
+    )
+    db_session.add(event)
+    db_session.commit()
+
+    t_tokyo = models.Talk(
+        event_id=event.id,
+        title="Tokyo Morning Session",
+        room="Room Tokyo",
+        start=datetime(2026, 10, 25, 22, 0, tzinfo=UTC),
+        end=datetime(2026, 10, 25, 23, 0, tzinfo=UTC),
+        status="waiting_for_files",
+    )
+    db_session.add(t_tokyo)
+    db_session.commit()
+
+    api_key = f"key_{uuid.uuid4().hex}"
+    client_model = models.Client(hashed_key=hash_api_key(api_key), event_ids=[event.id])
+    db_session.add(client_model)
+    db_session.commit()
+
+    # 1. get_room_days should report Oct 26, NOT Oct 25
+    resp = client.get(
+        f"/talks/room/days?room=Room%20Tokyo&event_id={event.id}",
+        headers={"X-API-Key": api_key},
+    )
+    assert resp.status_code == 200
+    days = resp.json()
+    assert len(days) == 1
+    assert days[0]["date"] == "2026-10-26"
+    assert days[0]["day_number"] == 1
+    assert "Oct 26, 2026" in days[0]["label"]
+
+    # 2. attach_room_recording with target_date=2026-10-26 should match this talk
+    with patch("app.routes.talks.heavy_queue"):
+        res = client.post(
+            "/talks/room/attach-recording",
+            data={
+                "room": "Room Tokyo",
+                "event_id": str(event.id),
+                "video_url": "https://example.com/tokyo.mp4",
+                "target_date": "2026-10-26",
+            },
+            headers={"X-API-Key": api_key},
+        )
+        assert res.status_code == 200
+        data = res.json()
+        assert data["attached_count"] == 1
+        assert data["talk_ids"] == [t_tokyo.id]
+        assert data["target_date"] == "2026-10-26"

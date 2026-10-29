@@ -1689,6 +1689,25 @@ def test_request_organizer_note_minimum_length(client: TestClient, db_session):
     assert res_min.status_code == 200
     assert res_min.json()["organizer_request_note"] == "a" * 20
 
+    # Empty string note is accepted and normalized to null
+    user_empty = _create_test_user(
+        db_session, "req_org_empty@admin-test.com", role="user"
+    )
+    token_empty = create_session_token(user_empty.id, user_empty.role)
+    client.cookies.set("veditor_session", token_empty)
+    res_empty = client.post("/users/request-organizer", json={"note": ""})
+    assert res_empty.status_code == 200
+    assert res_empty.json()["organizer_request_note"] is None
+
+    # Note exactly 500 characters long is accepted and preserved
+    user_500 = _create_test_user(db_session, "req_org_500@admin-test.com", role="user")
+    token_500 = create_session_token(user_500.id, user_500.role)
+    client.cookies.set("veditor_session", token_500)
+    note_500 = "a" * 500
+    res_500 = client.post("/users/request-organizer", json={"note": note_500})
+    assert res_500.status_code == 200
+    assert res_500.json()["organizer_request_note"] == note_500
+
 
 def test_request_organizer_note_unicode_code_point_validation(
     client: TestClient, db_session
@@ -1716,6 +1735,11 @@ def test_request_organizer_openapi_contract(client: TestClient):
     schema = res.json()
     post_op = schema["paths"]["/users/request-organizer"]["post"]
     assert "at least 20 characters" in post_op["description"]
+    resp_422 = post_op["responses"]["422"]
+    detail_schema = resp_422["content"]["application/json"]["schema"]["properties"][
+        "detail"
+    ]
+    assert "anyOf" in detail_schema
     note_prop = schema["components"]["schemas"]["OrganizerRequestCreate"]["properties"][
         "note"
     ]

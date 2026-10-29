@@ -762,8 +762,13 @@ document.addEventListener('DOMContentLoaded', () => {
     return Array.from(str || '');
   }
 
+  let lastVal = '';
+
   function openModal() {
-    if (noteInput) noteInput.value = '';
+    if (noteInput) {
+      noteInput.value = '';
+      lastVal = '';
+    }
     if (noteChars) noteChars.textContent = '0 / 500';
     if (errorEl) { errorEl.textContent = ''; errorEl.classList.add('hidden'); }
     Modal.open(modal);
@@ -780,10 +785,33 @@ document.addEventListener('DOMContentLoaded', () => {
 
   if (noteInput && noteChars) {
     noteInput.addEventListener('input', () => {
-      const codePoints = getCodePoints(noteInput.value);
-      if (codePoints.length > 500) {
-        noteInput.value = codePoints.slice(0, 500).join('');
+      const currentCP = getCodePoints(noteInput.value);
+      if (currentCP.length > 500) {
+        const lastCP = getCodePoints(lastVal);
+        let prefixLen = 0;
+        while (prefixLen < lastCP.length && prefixLen < currentCP.length && lastCP[prefixLen] === currentCP[prefixLen]) {
+          prefixLen++;
+        }
+        let suffixLen = 0;
+        while (
+          suffixLen < (lastCP.length - prefixLen) &&
+          suffixLen < (currentCP.length - prefixLen) &&
+          lastCP[lastCP.length - 1 - suffixLen] === currentCP[currentCP.length - 1 - suffixLen]
+        ) {
+          suffixLen++;
+        }
+        const prefix = lastCP.slice(0, prefixLen);
+        const suffix = suffixLen > 0 ? lastCP.slice(lastCP.length - suffixLen) : [];
+        const inserted = currentCP.slice(prefixLen, currentCP.length - suffixLen);
+        const allowed = Math.max(0, 500 - (prefix.length + suffix.length));
+        const accepted = inserted.slice(0, allowed);
+        noteInput.value = [...prefix, ...accepted, ...suffix].join('');
+        const newCaret = [...prefix, ...accepted].join('').length;
+        if (typeof noteInput.setSelectionRange === 'function') {
+          noteInput.setSelectionRange(newCaret, newCaret);
+        }
       }
+      lastVal = noteInput.value;
       const untrimmedCount = getCodePoints(noteInput.value).length;
       noteChars.textContent = `${untrimmedCount} / 500`;
       if (errorEl && !errorEl.classList.contains('hidden')) {

@@ -764,6 +764,26 @@ def verify_email_resend_submit(
     responses={
         status.HTTP_422_UNPROCESSABLE_CONTENT: {
             "description": "Validation error: non-empty note is shorter than 20 characters or exceeds 500 characters.",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "detail": {
+                                "anyOf": [
+                                    {"type": "string"},
+                                    {
+                                        "type": "array",
+                                        "items": {
+                                            "$ref": "#/components/schemas/ValidationError"
+                                        },
+                                    },
+                                ],
+                            },
+                        },
+                    },
+                },
+            },
         },
     },
 )

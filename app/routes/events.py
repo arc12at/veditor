@@ -25,6 +25,7 @@ from app.auth import (
     require_role,
 )
 from app.config import settings
+from app.consts import AuthRole
 from app.db import get_db
 from app.routes.talks import _cancel_talk_jobs, _lock_event_for_room_operation
 from app.security import create_sso_token
@@ -42,7 +43,7 @@ router = APIRouter(
 @router.post("", response_model=schemas.EventRead, status_code=status.HTTP_201_CREATED)
 def create_event(
     payload: schemas.EventCreate,
-    user: Annotated[CurrentUser, Depends(require_role("organizer"))],
+    user: Annotated[CurrentUser, Depends(require_role(AuthRole.ORGANIZER))],
     db: Annotated[Session, Depends(get_db)],
 ):
     if user.is_sso:
@@ -84,7 +85,7 @@ def create_event(
 
 @router.get("", response_model=list[schemas.EventRead], status_code=status.HTTP_200_OK)
 def list_events(
-    user: Annotated[CurrentUser, Depends(require_role("organizer"))],
+    user: Annotated[CurrentUser, Depends(require_role(AuthRole.ORGANIZER))],
     db: Annotated[Session, Depends(get_db)],
 ):
     if user.is_sso:
@@ -119,7 +120,7 @@ def _room_read(room: models.Room, talks_count: int = 0) -> schemas.RoomRead:
 @router.get("/{event_id}/rooms", response_model=list[schemas.RoomRead])
 def list_event_rooms(
     event_id: int,
-    user: Annotated[CurrentUser, Depends(require_role("organizer"))],
+    user: Annotated[CurrentUser, Depends(require_role(AuthRole.ORGANIZER))],
     db: Annotated[Session, Depends(get_db)],
 ):
     """List event rooms without mutating event or talk records."""
@@ -147,7 +148,7 @@ def list_event_rooms(
 def create_event_room(
     event_id: int,
     payload: schemas.RoomCreate,
-    user: Annotated[CurrentUser, Depends(require_role("organizer"))],
+    user: Annotated[CurrentUser, Depends(require_role(AuthRole.ORGANIZER))],
     db: Annotated[Session, Depends(get_db)],
 ):
     """Create an organizer-managed room scoped to one event."""
@@ -173,7 +174,7 @@ def update_event_room(
     event_id: int,
     room_id: int,
     payload: schemas.RoomUpdate,
-    user: Annotated[CurrentUser, Depends(require_role("organizer"))],
+    user: Annotated[CurrentUser, Depends(require_role(AuthRole.ORGANIZER))],
     db: Annotated[Session, Depends(get_db)],
 ):
     """Update a room and synchronize its talk assignments atomically."""
@@ -228,7 +229,7 @@ def update_event_room(
 def delete_event_room(
     event_id: int,
     room_id: int,
-    user: Annotated[CurrentUser, Depends(require_role("organizer"))],
+    user: Annotated[CurrentUser, Depends(require_role(AuthRole.ORGANIZER))],
     db: Annotated[Session, Depends(get_db)],
 ):
     """Delete a room and clear assignments for talks in the same event."""
@@ -257,7 +258,7 @@ def delete_event_room(
 def update_event(
     event_id: int,
     payload: schemas.EventUpdate,
-    user: Annotated[CurrentUser, Depends(require_role("organizer"))],
+    user: Annotated[CurrentUser, Depends(require_role(AuthRole.ORGANIZER))],
     db: Annotated[Session, Depends(get_db)],
 ):
     if user.is_sso:
@@ -311,7 +312,7 @@ def update_event(
 @router.delete("/{event_id}")
 def delete_event(
     event_id: int,
-    user: Annotated[CurrentUser, Depends(require_role("organizer"))],
+    user: Annotated[CurrentUser, Depends(require_role(AuthRole.ORGANIZER))],
     db: Annotated[Session, Depends(get_db)],
     storage: Annotated[StorageBackend, Depends(get_storage_backend)],
 ):
@@ -436,7 +437,7 @@ def _get_event_client(event_id: int, db: Session) -> models.Client | None:
 )
 def list_event_api_keys(
     event_id: int,
-    user: Annotated[CurrentUser, Depends(require_role("organizer"))],
+    user: Annotated[CurrentUser, Depends(require_role(AuthRole.ORGANIZER))],
     db: Annotated[Session, Depends(get_db)],
 ):
     """List all active API keys scoped to this event."""
@@ -481,7 +482,7 @@ def list_event_api_keys(
 )
 def create_event_api_key(
     event_id: int,
-    user: Annotated[CurrentUser, Depends(require_role("organizer"))],
+    user: Annotated[CurrentUser, Depends(require_role(AuthRole.ORGANIZER))],
     db: Annotated[Session, Depends(get_db)],
     payload: schemas.ApiKeyCreate | None = None,
 ):
@@ -556,7 +557,7 @@ def create_event_api_key(
 def revoke_event_api_key(
     event_id: int,
     client_id: int,
-    user: Annotated[CurrentUser, Depends(require_role("organizer"))],
+    user: Annotated[CurrentUser, Depends(require_role(AuthRole.ORGANIZER))],
     db: Annotated[Session, Depends(get_db)],
 ):
     """Revoke an API key scoped to this event."""
@@ -590,7 +591,7 @@ def revoke_event_api_key(
 )
 def get_event_webhook(
     event_id: int,
-    user: Annotated[CurrentUser, Depends(require_role("organizer"))],
+    user: Annotated[CurrentUser, Depends(require_role(AuthRole.ORGANIZER))],
     db: Annotated[Session, Depends(get_db)],
 ):
     """Retrieve the event's configured outbound webhook settings."""
@@ -627,7 +628,7 @@ def get_event_webhook(
 def update_event_webhook(
     event_id: int,
     payload: schemas.WebhookRegisterRequest,
-    user: Annotated[CurrentUser, Depends(require_role("organizer"))],
+    user: Annotated[CurrentUser, Depends(require_role(AuthRole.ORGANIZER))],
     db: Annotated[Session, Depends(get_db)],
 ):
     """Configure or update the outbound webhook URL and secret for an event."""
@@ -701,7 +702,7 @@ def update_event_webhook(
 )
 def delete_event_webhook(
     event_id: int,
-    user: Annotated[CurrentUser, Depends(require_role("organizer"))],
+    user: Annotated[CurrentUser, Depends(require_role(AuthRole.ORGANIZER))],
     db: Annotated[Session, Depends(get_db)],
 ):
     """Clear outbound webhook configuration for this event."""
@@ -762,7 +763,7 @@ def _validate_webhook_target_ip(url: str) -> None:
 def test_event_webhook(
     event_id: int,
     payload: schemas.WebhookTestRequest,
-    user: Annotated[CurrentUser, Depends(require_role("organizer"))],
+    user: Annotated[CurrentUser, Depends(require_role(AuthRole.ORGANIZER))],
     db: Annotated[Session, Depends(get_db)],
 ):
     """Send a signed test ping webhook to verify destination URL and HMAC secret."""

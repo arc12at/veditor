@@ -1727,6 +1727,25 @@ def test_request_organizer_note_unicode_code_point_validation(
     assert res_valid_emoji.status_code == 200
     assert res_valid_emoji.json()["organizer_request_note"] == "🚀" * 20
 
+    # 500 emoji (500 code points, 1000 UTF-16 code units) is accepted
+    user_emoji_500 = _create_test_user(
+        db_session, "req_org_emoji_500@admin-test.com", role="user"
+    )
+    token_emoji_500 = create_session_token(user_emoji_500.id, user_emoji_500.role)
+    client.cookies.set("veditor_session", token_emoji_500)
+    res_max_emoji = client.post("/users/request-organizer", json={"note": "🚀" * 500})
+    assert res_max_emoji.status_code == 200
+    assert res_max_emoji.json()["organizer_request_note"] == "🚀" * 500
+
+    # 501 emoji (501 code points) is rejected (> 500)
+    user_emoji_501 = _create_test_user(
+        db_session, "req_org_emoji_501@admin-test.com", role="user"
+    )
+    token_emoji_501 = create_session_token(user_emoji_501.id, user_emoji_501.role)
+    client.cookies.set("veditor_session", token_emoji_501)
+    res_over_emoji = client.post("/users/request-organizer", json={"note": "🚀" * 501})
+    assert res_over_emoji.status_code == 422
+
 
 def test_request_organizer_openapi_contract(client: TestClient):
     """OpenAPI contract documents the minimum and maximum note length requirements."""

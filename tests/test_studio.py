@@ -3722,6 +3722,13 @@ def test_talk_studio_organizer_request_prompt(client: TestClient, db_session):
         )
         is not None
     )
+    assert (
+        re.search(
+            r'<textarea[^>]*id="organizer-request-note"[^>]*\bmaxlength\b',
+            res.text,
+        )
+        is None
+    )
 
     # 2. Standard user with pending request sees pending banner
     user.organizer_requested = True
@@ -3801,13 +3808,19 @@ def test_dashboard_organizer_request_modal(client: TestClient, db_session):
     assert "modal-request-organizer" in res.text
     assert "0 / 500" in res.text
     assert 'maxlength="500"' not in res.text
-    assert 'maxlength="1000"' in res.text
     assert (
         re.search(
             r'<textarea[^>]*id="organizer-request-note"[^>]*class="[^"]*\binput-field\b',
             res.text,
         )
         is not None
+    )
+    assert (
+        re.search(
+            r'<textarea[^>]*id="organizer-request-note"[^>]*\bmaxlength\b',
+            res.text,
+        )
+        is None
     )
 
 

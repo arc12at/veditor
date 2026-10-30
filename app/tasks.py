@@ -617,26 +617,31 @@ def job_cut(talk_id: int, raw_key: str, cut_key: str | None = None) -> None:
             talk = db.get(Talk, talk_id)
             if not talk:
                 raise ValueError(f"Talk {talk_id} not found")
-            if talk.cut_start is None or talk.cut_end is None:
-                raise ValueError(f"Talk {talk_id} has no cut bounds set")
             # Synchronize cut_segments with scalar bounds if missing, mismatched, or out of bounds
             segments = talk.cut_segments
-            if (
-                not segments
-                or abs(segments[0].get("start", -1) - talk.cut_start) > 0.001
-                or abs(segments[-1].get("end", -1) - talk.cut_end) > 0.001
-                or any(
-                    s.get("start", 0) >= s.get("end", 0)
-                    or s.get("start", 0) < 0
-                    or (
-                        talk.raw_duration_seconds is not None
-                        and s.get("end", 0) > talk.raw_duration_seconds + 0.001
-                    )
-                    for s in segments
-                )
-            ):
+            if not segments:
+                if talk.cut_start is None or talk.cut_end is None:
+                    raise ValueError(f"Talk {talk_id} has no cut bounds set")
                 segments = [{"start": talk.cut_start, "end": talk.cut_end}]
                 talk.cut_segments = segments
+            elif talk.cut_start is not None and talk.cut_end is not None:
+                if (
+                    abs(segments[0].get("start", -1) - talk.cut_start) > 0.001
+                    or abs(segments[-1].get("end", -1) - talk.cut_end) > 0.001
+                ):
+                    segments = [{"start": talk.cut_start, "end": talk.cut_end}]
+                    talk.cut_segments = segments
+
+            if any(
+                s.get("start", 0) >= s.get("end", 0)
+                or s.get("start", 0) < 0
+                or (
+                    talk.raw_duration_seconds is not None
+                    and s.get("end", 0) > talk.raw_duration_seconds + 0.001
+                )
+                for s in segments
+            ):
+                raise ValueError(f"Talk {talk_id} has invalid cut segments: {segments}")
 
             if len(segments) > MAX_CUT_SEGMENTS:
                 raise ValueError(
@@ -705,24 +710,37 @@ def job_cut(talk_id: int, raw_key: str, cut_key: str | None = None) -> None:
                     sum(s["end"] - s["start"] for s in segments),
                 )
             with SessionLocal() as db:
-                talk = db.get(Talk, talk_id)
-                job = db.get(Job, job_id)
-                newer_cut_job = None
+                talk = None
                 if hasattr(db, "query"):
                     try:
-                        res = (
-                            db.query(Job)
-                            .filter(
-                                Job.talk_id == talk_id,
-                                Job.kind == "cut",
-                                Job.id > job_id,
-                            )
-                            .first()
-                        )
-                        if isinstance(res, Job) and getattr(res, "id", 0) > job_id:
-                            newer_cut_job = res
+                        q = db.query(Talk).filter(Talk.id == talk_id)
+                        if hasattr(q, "with_for_update"):
+                            res = q.with_for_update().first()
+                            if isinstance(res, Talk):
+                                talk = res
+                        if talk is None:
+                            res = q.first()
+                            if isinstance(res, Talk):
+                                talk = res
                     except Exception:  # noqa: BLE001
-                        newer_cut_job = None
+                        talk = None
+                if talk is None and hasattr(db, "get"):
+                    talk = db.get(Talk, talk_id)
+
+                job = db.get(Job, job_id)
+                newer_cut_job = None
+                if hasattr(db, "query") and job_id is not None:
+                    res = (
+                        db.query(Job)
+                        .filter(
+                            Job.talk_id == talk_id,
+                            Job.kind.in_(["cut", "cut_multi"]),
+                            Job.id > job_id,
+                        )
+                        .first()
+                    )
+                    if isinstance(res, Job) and getattr(res, "id", 0) > job_id:
+                        newer_cut_job = res
 
                 if (
                     not talk
@@ -761,6 +779,15 @@ def job_cut(talk_id: int, raw_key: str, cut_key: str | None = None) -> None:
     except Exception as exc:
         _handle_failure(talk_id, job_id, exc, storage)
         raise
+
+
+def job_cut_multi(talk_id: int, raw_key: str, cut_key: str | None = None) -> None:
+    """Worker task for multi-segment cuts.
+
+    Separate job entrypoint so older workers that only process scalar bounds
+    will not pick up and execute multi-segment cut jobs.
+    """
+    job_cut(talk_id, raw_key, cut_key)
 
 
 def dispatch_assembly(talk_id: int, cut_key: str) -> None:

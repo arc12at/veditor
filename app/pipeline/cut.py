@@ -299,6 +299,7 @@ def _cut_frame_accurate(
             out_v = out_container.add_stream(
                 v_enc_name, rate=can_fps, options=video_options
             )
+            out_v.codec_context.time_base = Fraction(1, 90000)
             out_v.width = can_w
             out_v.height = can_h
             out_v.pix_fmt = "yuv420p"
@@ -308,7 +309,7 @@ def _cut_frame_accurate(
             out_a = out_container.add_stream(a_enc_name, rate=can_sr)
             out_a.layout = can_layout
 
-        v_pts = 0
+        last_v_pts: int | None = None
         a_pts = 0
 
         with av.open(input_path) as in_c:
@@ -349,9 +350,15 @@ def _cut_frame_accurate(
                         if t > end_seconds + 0.001:
                             continue
                         rf = frame.reformat(width=can_w, height=can_h, format="yuv420p")
+                        offset_s = max(0.0, t - start_seconds)
+                        target_pts = round(offset_s * 90000)
+                        v_pts = max(
+                            target_pts,
+                            (last_v_pts + 1) if last_v_pts is not None else 0,
+                        )
+                        last_v_pts = v_pts
                         rf.pts = v_pts
-                        rf.time_base = Fraction(1, can_fps)
-                        v_pts += 1
+                        rf.time_base = Fraction(1, 90000)
                         for enc_p in out_v.encode(rf):
                             out_container.mux(enc_p)
                     elif isinstance(frame, av.AudioFrame) and out_a:
@@ -373,6 +380,14 @@ def _cut_frame_accurate(
                             a_pts += rf.samples
                             for enc_p in out_a.encode(rf):
                                 out_container.mux(enc_p)
+
+        if resampler and out_a:
+            for rf in resampler.resample(None):
+                rf.pts = a_pts
+                rf.time_base = Fraction(1, can_sr)
+                a_pts += rf.samples
+                for enc_p in out_a.encode(rf):
+                    out_container.mux(enc_p)
 
         if out_v:
             for enc_p in out_v.encode():

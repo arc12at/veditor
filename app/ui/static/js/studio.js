@@ -98,6 +98,7 @@ const btnSetOut       = document.getElementById('btn-set-out');
 const btnPlayCut      = document.getElementById('btn-play-cut');
 const btnAddSegment   = document.getElementById('btn-add-segment');
 const btnSplitSegment = document.getElementById('btn-split-segment');
+const MAX_CUT_SEGMENTS = 50;
 
 let inPointSec  = 0;
 let outPointSec = 0;
@@ -640,6 +641,18 @@ function updateCutMarkersUI() {
       cutDurationBadge.textContent = `Selected Cut: ${formatSelectedDuration(totalDuration)}`;
     }
   }
+
+  const btnAdd = document.getElementById('btn-add-segment');
+  const btnSplit = document.getElementById('btn-split-segment');
+  const atMaxSegments = cutSegments.length >= MAX_CUT_SEGMENTS;
+  if (btnAdd && !isStudioViewOnly()) {
+    btnAdd.disabled = atMaxSegments;
+    btnAdd.title = atMaxSegments ? `Maximum limit of ${MAX_CUT_SEGMENTS} cut segments reached` : 'Add another cut segment';
+  }
+  if (btnSplit && !isStudioViewOnly()) {
+    btnSplit.disabled = atMaxSegments;
+    btnSplit.title = atMaxSegments ? `Maximum limit of ${MAX_CUT_SEGMENTS} cut segments reached` : 'Split current cut at playhead (S)';
+  }
 }
 
 function setInPoint(timeSec) {
@@ -672,6 +685,16 @@ function setOutPoint(timeSec) {
 
 function addSegment() {
   if (isStudioViewOnly()) return;
+  if (cutSegments.length >= MAX_CUT_SEGMENTS) {
+    if (window.Modal) {
+      Modal.alert({
+        title: 'Segment Limit Reached',
+        message: `A talk can have at most ${MAX_CUT_SEGMENTS} cut segments. Please remove or merge segments before adding another.`,
+        variant: 'warning',
+      });
+    }
+    return;
+  }
   const dur = (video?.duration > 0) ? video.duration : 10;
   cutSegments.sort((a, b) => a.start - b.start);
 
@@ -724,6 +747,16 @@ function addSegment() {
 
 function splitCurrentSegment() {
   if (isStudioViewOnly()) return;
+  if (cutSegments.length >= MAX_CUT_SEGMENTS) {
+    if (window.Modal) {
+      Modal.alert({
+        title: 'Segment Limit Reached',
+        message: `A talk can have at most ${MAX_CUT_SEGMENTS} cut segments. Please remove or merge segments before splitting.`,
+        variant: 'warning',
+      });
+    }
+    return;
+  }
   const t = video ? video.currentTime : 0;
   const cur = cutSegments[activeSegmentIndex];
   if (!cur) return;

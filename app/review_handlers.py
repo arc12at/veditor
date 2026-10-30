@@ -27,7 +27,7 @@ def _record_review_and_advance(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=f"Cannot approve talk: state has already advanced to '{talk.status}'",
             )
-        if talk.cut_start is None or talk.cut_end is None:
+        if (talk.cut_start is None or talk.cut_end is None) and not talk.cut_segments:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Cannot approve a talk without cut bounds.",

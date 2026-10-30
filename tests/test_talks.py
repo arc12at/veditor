@@ -961,13 +961,20 @@ def test_submit_cut_bounds_multiple_segments_accepted():
             )
             assert resp.status_code == 202
             assert mock_talk.status == "cutting"
-            assert mock_talk.cut_start == 300.0
-            assert mock_talk.cut_end == 1800.0
+            assert mock_talk.cut_start is None
+            assert mock_talk.cut_end is None
             assert mock_talk.cut_segments == [
                 {"start": 300.0, "end": 900.0},
                 {"start": 1200.0, "end": 1800.0},
             ]
-            mock_enqueue.assert_called_once()
+            from app.tasks import job_cut_multi
+
+            mock_enqueue.assert_called_once_with(
+                job_cut_multi,
+                1,
+                "1/raw/video.mp4",
+                job_timeout=900,
+            )
         finally:
             app.dependency_overrides.clear()
 

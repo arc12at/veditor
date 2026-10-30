@@ -2087,3 +2087,151 @@ def test_seed_cut_bounds_clamped_to_duration(dummy_talk):
 
     assert dummy_talk.cut_start == pytest.approx(0.0)
     assert dummy_talk.cut_end == pytest.approx(14400.0)  # clamped to duration
+
+
+def test_job_cut_fails_closed_when_newer_job_query_errors(
+    dummy_talk, mock_storage, tmp_path
+):
+    """Worker fails closed without calling storage.put when newer cut job query fails."""
+    from unittest.mock import MagicMock, patch
+
+    from app.models import Job, Talk
+    from app.tasks import job_cut
+
+    dummy_talk.status = "cutting"
+    dummy_talk.cut_start = 10.0
+    dummy_talk.cut_end = 50.0
+    dummy_talk.cut_segments = [{"start": 10.0, "end": 50.0}]
+
+    mock_db = MagicMock()
+    job_mock = Job(id=1, talk_id=dummy_talk.id, kind="cut", status="running")
+    mock_db.get.side_effect = lambda model, oid: (
+        job_mock if model == Job else dummy_talk
+    )
+
+    def add_side_effect(obj):
+        if isinstance(obj, Job) and obj.id is None:
+            obj.id = 1
+
+    mock_db.add.side_effect = add_side_effect
+
+    def query_side_effect(model):
+        q = MagicMock()
+        if model == Talk:
+            q.filter.return_value.with_for_update.return_value.first.return_value = (
+                dummy_talk
+            )
+            q.filter.return_value.first.return_value = dummy_talk
+            return q
+        if model == Job:
+            raise RuntimeError("Database query failure")
+        return q
+
+    mock_db.query.side_effect = query_side_effect
+
+    class TestDBContext:
+        def __enter__(self):
+            return mock_db
+
+        def __exit__(self, *args):
+            pass
+
+    def fake_cut(inp, out, *args, **kwargs):
+        Path(out).write_bytes(b"cut content")
+
+    with (
+        patch("app.tasks.SessionLocal", return_value=TestDBContext()),
+        patch("app.tasks.get_storage_backend", return_value=mock_storage),
+        patch("app.tasks.cut", side_effect=fake_cut),
+        patch("app.tasks.light_queue.enqueue"),
+        pytest.raises(RuntimeError, match="Database query failure"),
+    ):
+        job_cut(dummy_talk.id, "1/raw/raw.mp4")
+
+    # Storage put must never have published the cut video artifact
+    cut_key = f"{dummy_talk.id}/cut/cut.mp4"
+    for call in mock_storage.put.call_args_list:
+        assert call[0][0] != cut_key
+
+
+def test_job_cut_discards_output_when_talk_superseded_or_aborted(
+    dummy_talk, mock_storage
+):
+    """Worker discards output without calling storage.put if talk was aborted or superseded."""
+    from unittest.mock import MagicMock, patch
+
+    from app.models import Job, Talk
+    from app.tasks import job_cut
+
+    dummy_talk.status = "cutting"
+    dummy_talk.cut_start = 10.0
+    dummy_talk.cut_end = 50.0
+
+    mock_db = MagicMock()
+    aborted_talk = Talk(
+        id=dummy_talk.id,
+        status="waiting_for_files",
+        cut_start=None,
+        cut_end=None,
+    )
+    job_mock = Job(id=1, talk_id=dummy_talk.id, kind="cut", status="running")
+
+    def add_side_effect(obj):
+        if isinstance(obj, Job) and obj.id is None:
+            obj.id = 1
+
+    mock_db.add.side_effect = add_side_effect
+
+    def query_side_effect(model):
+        q = MagicMock()
+        if model == Talk:
+            q.filter.return_value.with_for_update.return_value.first.return_value = (
+                aborted_talk
+            )
+            q.filter.return_value.first.return_value = aborted_talk
+            return q
+        if model == Job:
+            q.filter.return_value.first.return_value = None
+            return q
+        return q
+
+    mock_db.query.side_effect = query_side_effect
+    mock_db.get.side_effect = lambda model, oid: (
+        job_mock if model == Job else dummy_talk
+    )
+
+    class TestDBContext:
+        def __enter__(self):
+            return mock_db
+
+        def __exit__(self, *args):
+            pass
+
+    def fake_cut(inp, out, *args, **kwargs):
+        Path(out).write_bytes(b"cut content")
+
+    with (
+        patch("app.tasks.SessionLocal", return_value=TestDBContext()),
+        patch("app.tasks.get_storage_backend", return_value=mock_storage),
+        patch("app.tasks.cut", side_effect=fake_cut),
+        patch("app.tasks.light_queue.enqueue") as mock_enqueue,
+    ):
+        job_cut(dummy_talk.id, "1/raw/raw.mp4")
+
+    cut_key = f"{dummy_talk.id}/cut/cut.mp4"
+    for call in mock_storage.put.call_args_list:
+        assert call[0][0] != cut_key
+    mock_enqueue.assert_not_called()
+
+
+def test_job_cut_multi_invokes_job_cut():
+    """Verify job_cut_multi acts as an entrypoint delegating to job_cut."""
+    from unittest.mock import patch
+
+    from app.tasks import job_cut_multi
+
+    with patch("app.tasks.job_cut") as mock_job_cut:
+        job_cut_multi(42, "42/raw/video.mp4", "42/cut/custom.mp4")
+        mock_job_cut.assert_called_once_with(
+            42, "42/raw/video.mp4", "42/cut/custom.mp4"
+        )

@@ -59,6 +59,7 @@ from app.tasks import (
     STAGE_CONFIG,
     dispatch_assembly,
     job_cut,
+    job_cut_multi,
     job_detect,
     job_ingest,
     job_ingest_room_url,
@@ -549,9 +550,17 @@ def submit_cut_bounds(
         )
     raw_key = raw_keys[0]
 
-    talk.cut_start = cut_start_s
-    talk.cut_end = cut_end_s
-    talk.cut_segments = [{"start": s[0], "end": s[1]} for s in parsed_segs]
+    if len(parsed_segs) == 1:
+        talk.cut_start = cut_start_s
+        talk.cut_end = cut_end_s
+        talk.cut_segments = [{"start": cut_start_s, "end": cut_end_s}]
+        cut_fn = job_cut
+    else:
+        talk.cut_start = None
+        talk.cut_end = None
+        talk.cut_segments = [{"start": s[0], "end": s[1]} for s in parsed_segs]
+        cut_fn = job_cut_multi
+
     advance(talk, "cutting")
     if payload.note:
         user_id = user.user_id if (not user.is_machine and not user.is_sso) else None
@@ -566,7 +575,7 @@ def submit_cut_bounds(
     db.refresh(talk)
 
     light_queue.enqueue(
-        job_cut,
+        cut_fn,
         talk.id,
         raw_key,
         job_timeout=STAGE_CONFIG["cut"]["job_timeout"],
@@ -966,7 +975,12 @@ def abort_talk(
     clears DB jobs and reviews, and resets talk status back to 'waiting_for_files'.
     Returns 404 if talk is not found or not authorized for caller's events.
     """
-    talk = db.query(models.Talk).filter(models.Talk.id == talk_id).first()
+    talk = (
+        db.query(models.Talk)
+        .filter(models.Talk.id == talk_id)
+        .with_for_update()
+        .first()
+    )
     if not talk or (user.is_machine and not user.has_event_access(talk.event_id)):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Talk not found"

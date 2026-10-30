@@ -1029,6 +1029,29 @@ def test_review_multiple_approvals_create_multiple_rows(mock_db, preview_talk):
     assert approved_cuts[1].cut_end == 55.0
 
 
+def test_review_approve_multi_segment_creates_multiple_approved_cuts(
+    mock_db, preview_talk
+):
+    preview_talk.status = "preview"
+    preview_talk.cut_start = 10.0
+    preview_talk.cut_end = 50.0
+    preview_talk.cut_segments = [
+        {"start": 10.0, "end": 25.0},
+        {"start": 30.0, "end": 50.0},
+    ]
+
+    req = schemas.ReviewRequest(decision=schemas.ReviewDecision.approve)
+    handle_approve(preview_talk, req, mock_db)
+
+    added_objs = [call[0][0] for call in mock_db.add.call_args_list]
+    approved_cuts = [obj for obj in added_objs if isinstance(obj, models.ApprovedCut)]
+    assert len(approved_cuts) == 2
+    assert approved_cuts[0].cut_start == 10.0
+    assert approved_cuts[0].cut_end == 25.0
+    assert approved_cuts[1].cut_start == 30.0
+    assert approved_cuts[1].cut_end == 50.0
+
+
 @pytest.mark.parametrize(
     ("cut_start", "cut_end"),
     [

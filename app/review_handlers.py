@@ -36,14 +36,18 @@ def _record_review_and_advance(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Cannot approve a talk without cut bounds.",
                 )
-            db.add(
-                models.ApprovedCut(
-                    talk_id=talk.id,
-                    cut_start=talk.cut_start,
-                    cut_end=talk.cut_end,
-                    review=review,
+            segments = talk.cut_segments or [
+                {"start": talk.cut_start, "end": talk.cut_end}
+            ]
+            for seg in segments:
+                db.add(
+                    models.ApprovedCut(
+                        talk_id=talk.id,
+                        cut_start=seg["start"],
+                        cut_end=seg["end"],
+                        review=review,
+                    )
                 )
-            )
 
         advance(talk, target_state)
         db.flush()
@@ -135,6 +139,7 @@ def handle_reject(
 ) -> schemas.ReviewResponse:
     talk.cut_start = None
     talk.cut_end = None
+    talk.cut_segments = None
     response = _record_review_and_advance(
         talk, payload, "pending_bounds", db, user_id=user_id
     )

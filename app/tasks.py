@@ -35,7 +35,7 @@ from app.ingest import (
     validate_media_file,
 )
 from app.models import Job, Talk
-from app.pipeline.concat import concat
+from app.pipeline.concat import concat, concat_segments
 from app.pipeline.cut import cut
 from app.pipeline.detect import (
     DETECT_DURATION_TOLERANCE_SECONDS,
@@ -411,6 +411,7 @@ def job_ingest_room_url(
                 if offset_end > offset_start:
                     talk.cut_start = offset_start
                     talk.cut_end = offset_end
+                    talk.cut_segments = [{"start": offset_start, "end": offset_end}]
 
                 if talk.id in job_ids:
                     job = db.get(Job, job_ids[talk.id])
@@ -565,6 +566,7 @@ def job_detect(
                 if offset_e > offset_s:
                     talk.cut_start = offset_s
                     talk.cut_end = offset_e
+                    talk.cut_segments = [{"start": offset_s, "end": offset_e}]
 
             advance(talk, "pending_approval")
             job.status = "done"
@@ -597,8 +599,9 @@ def job_cut(talk_id: int, raw_key: str, cut_key: str | None = None) -> None:
             db.commit()
             db.refresh(job)
             job_id = job.id
-            start_seconds = talk.cut_start
-            end_seconds = talk.cut_end
+            segments = talk.cut_segments or [
+                {"start": talk.cut_start, "end": talk.cut_end}
+            ]
 
         raw_path = storage.get(raw_key)
 
@@ -609,25 +612,45 @@ def job_cut(talk_id: int, raw_key: str, cut_key: str | None = None) -> None:
                 if settings.encoder_threads is not None
                 else {}
             )
-            cut_strategy = cut(
-                raw_path,
-                tmp_out,
-                start_seconds,
-                end_seconds,
-                **cut_kwargs,
-            )
-            strat_label = (
-                getattr(cut_strategy, "value", str(cut_strategy))
-                if cut_strategy is not None
-                else "unknown"
-            )
-            logger.info(
-                "Talk %s cut complete using strategy '%s' (bounds: %.2fs - %.2fs)",
-                talk_id,
-                strat_label,
-                start_seconds,
-                end_seconds,
-            )
+            if len(segments) == 1:
+                cut_strategy = cut(
+                    raw_path,
+                    tmp_out,
+                    segments[0]["start"],
+                    segments[0]["end"],
+                    **cut_kwargs,
+                )
+                strat_label = (
+                    getattr(cut_strategy, "value", str(cut_strategy))
+                    if cut_strategy is not None
+                    else "unknown"
+                )
+                logger.info(
+                    "Talk %s cut complete using strategy '%s' (bounds: %.2fs - %.2fs)",
+                    talk_id,
+                    strat_label,
+                    segments[0]["start"],
+                    segments[0]["end"],
+                )
+            else:
+                seg_paths = []
+                for idx, seg in enumerate(segments):
+                    seg_p = Path(tmpdir) / f"seg_{idx}.mp4"
+                    cut(
+                        raw_path,
+                        seg_p,
+                        seg["start"],
+                        seg["end"],
+                        **cut_kwargs,
+                    )
+                    seg_paths.append(seg_p)
+                concat_segments(seg_paths, tmp_out, **cut_kwargs)
+                logger.info(
+                    "Talk %s multi-segment cut complete (%s segments, total duration: %.2fs)",
+                    talk_id,
+                    len(segments),
+                    sum(s["end"] - s["start"] for s in segments),
+                )
             _cache_waveform(storage, cut_key, tmp_out)
             storage.put(cut_key, tmp_out)
 
@@ -1404,7 +1427,12 @@ def job_publish(talk_id: int, final_key: str) -> None:
             db.refresh(talk)
 
             if duration_seconds is None or duration_seconds <= 0:
-                if talk.cut_start is not None and talk.cut_end is not None:
+                if talk.cut_segments:
+                    duration_seconds = max(
+                        0.0,
+                        sum(s["end"] - s["start"] for s in talk.cut_segments),
+                    )
+                elif talk.cut_start is not None and talk.cut_end is not None:
                     duration_seconds = max(0.0, talk.cut_end - talk.cut_start)
                 elif talk.raw_duration_seconds is not None:
                     duration_seconds = talk.raw_duration_seconds

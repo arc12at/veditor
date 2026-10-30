@@ -520,6 +520,7 @@ def submit_cut_bounds(
             detail=f"Cannot submit cut bounds for talk in status '{talk.status}'",
         )
 
+    parsed_segs = payload.parsed_segments()
     cut_start_s, cut_end_s = payload.parsed_seconds()
 
     if talk.raw_duration_seconds is None:
@@ -550,6 +551,7 @@ def submit_cut_bounds(
 
     talk.cut_start = cut_start_s
     talk.cut_end = cut_end_s
+    talk.cut_segments = [{"start": s[0], "end": s[1]} for s in parsed_segs]
     advance(talk, "cutting")
     if payload.note:
         user_id = user.user_id if (not user.is_machine and not user.is_sso) else None
@@ -982,6 +984,7 @@ def abort_talk(
     talk.raw_duration_seconds = None
     talk.cut_start = None
     talk.cut_end = None
+    talk.cut_segments = None
     talk.include_intro = False
     talk.include_outro = False
     talk.intro_source = None

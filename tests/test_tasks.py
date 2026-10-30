@@ -899,6 +899,47 @@ def test_job_cut_with_local_storage_caches_waveform(dummy_talk, tmp_path):
     assert max(wf_content["peaks"]) > 0.0
 
 
+def test_job_cut_multi_segment_concatenates_cuts(dummy_talk, tmp_path):
+    import av
+
+    from app.pipeline.detect import container_duration_seconds
+    from app.storage import LocalDiskBackend
+    from tests.conftest import generate_clip
+
+    storage = LocalDiskBackend(data_dir=tmp_path)
+    raw_clip = generate_clip(
+        3.0,
+        has_video=True,
+        has_audio=True,
+        audio_waveform="tone",
+        output_dir=tmp_path / "raw_src",
+    )
+    storage.put("1/raw/raw.mp4", raw_clip)
+
+    dummy_talk.status = "cutting"
+    dummy_talk.cut_start = 0.0
+    dummy_talk.cut_end = 2.5
+    dummy_talk.cut_segments = [
+        {"start": 0.0, "end": 1.0},
+        {"start": 1.5, "end": 2.5},
+    ]
+    jobs = {}
+    db_ctx = MockDBContext(dummy_talk, jobs)
+
+    with (
+        patch("app.tasks.SessionLocal", side_effect=db_ctx),
+        patch("app.tasks.get_storage_backend", return_value=storage),
+        patch("app.tasks.light_queue.enqueue"),
+    ):
+        job_cut(dummy_talk.id, "1/raw/raw.mp4", "1/cut/cut.mp4")
+
+    assert storage.exists("1/cut/cut.mp4")
+    out_file = storage.get("1/cut/cut.mp4")
+    with av.open(str(out_file)) as c:
+        out_dur = container_duration_seconds(c)
+    assert out_dur == pytest.approx(2.0, abs=0.5)
+
+
 def test_handle_failure_on_deleted_job_does_not_mark_talk_broken(
     dummy_talk, mock_storage
 ):

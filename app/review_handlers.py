@@ -21,6 +21,18 @@ def _record_review_and_advance(
     db: Session,
     user_id: int | None = None,
 ) -> schemas.ReviewResponse:
+    if payload.decision == schemas.ReviewDecision.approve:
+        if talk.status in ("assembling", "transcoding", "uploading", "done"):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Cannot approve talk: state has already advanced to '{talk.status}'",
+            )
+        if talk.cut_start is None or talk.cut_end is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot approve a talk without cut bounds.",
+            )
+
     try:
         review = models.Review(
             talk_id=talk.id,
@@ -31,11 +43,6 @@ def _record_review_and_advance(
         db.add(review)
 
         if payload.decision == schemas.ReviewDecision.approve:
-            if talk.cut_start is None or talk.cut_end is None:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Cannot approve a talk without cut bounds.",
-                )
             segments = talk.cut_segments or [
                 {"start": talk.cut_start, "end": talk.cut_end}
             ]

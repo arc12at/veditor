@@ -600,17 +600,29 @@ function updateCutMarkersUI() {
         outSpan.textContent = formatTimecode(seg.end);
         if (idx === cutSegments.length - 1) outSpan.id = 'review-out-point';
 
-        pill.innerHTML = `
-          <div class="timestamp-unit">
-            <span class="timestamp-label">Cut ${idx + 1} In</span>
-          </div>
-          <span class="timestamp-arrow">→</span>
-          <div class="timestamp-unit">
-            <span class="timestamp-label">Cut ${idx + 1} Out</span>
-          </div>
-        `;
-        pill.querySelector('.timestamp-unit:first-child').appendChild(inSpan);
-        pill.querySelector('.timestamp-unit:last-child').appendChild(outSpan);
+        const unitIn = document.createElement('div');
+        unitIn.className = 'timestamp-unit';
+        const labelIn = document.createElement('span');
+        labelIn.className = 'timestamp-label';
+        labelIn.textContent = `Cut ${idx + 1} In`;
+        unitIn.appendChild(labelIn);
+        unitIn.appendChild(inSpan);
+
+        const arrow = document.createElement('span');
+        arrow.className = 'timestamp-arrow';
+        arrow.textContent = '→';
+
+        const unitOut = document.createElement('div');
+        unitOut.className = 'timestamp-unit';
+        const labelOut = document.createElement('span');
+        labelOut.className = 'timestamp-label';
+        labelOut.textContent = `Cut ${idx + 1} Out`;
+        unitOut.appendChild(labelOut);
+        unitOut.appendChild(outSpan);
+
+        pill.appendChild(unitIn);
+        pill.appendChild(arrow);
+        pill.appendChild(unitOut);
         return pill;
       })
     );

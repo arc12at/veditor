@@ -999,21 +999,24 @@ def test_review_human_admin_success(mock_db, preview_talk, fake_storage):
 
 def test_review_multiple_approvals_create_multiple_rows(mock_db, preview_talk):
     """A talk that goes needs_work and is approved on a later pass has one ApprovedCut row per approval, not one overwritten row."""
-    # First approve
-    req_approve1 = schemas.ReviewRequest(decision=schemas.ReviewDecision.approve)
-    handle_approve(preview_talk, req_approve1, mock_db)
+    with patch("app.tasks.dispatch_assembly"):
+        # First approve
+        req_approve1 = schemas.ReviewRequest(decision=schemas.ReviewDecision.approve)
+        handle_approve(preview_talk, req_approve1, mock_db)
 
-    # Then needs work
-    preview_talk.status = "preview"
-    req_needs_work = schemas.ReviewRequest(decision=schemas.ReviewDecision.needs_work)
-    handle_needs_work(preview_talk, req_needs_work, mock_db)
+        # Then needs work
+        preview_talk.status = "preview"
+        req_needs_work = schemas.ReviewRequest(
+            decision=schemas.ReviewDecision.needs_work
+        )
+        handle_needs_work(preview_talk, req_needs_work, mock_db)
 
-    # Second approve with different bounds
-    preview_talk.status = "preview"
-    preview_talk.cut_start = 12.0
-    preview_talk.cut_end = 55.0
-    req_approve2 = schemas.ReviewRequest(decision=schemas.ReviewDecision.approve)
-    handle_approve(preview_talk, req_approve2, mock_db)
+        # Second approve with different bounds
+        preview_talk.status = "preview"
+        preview_talk.cut_start = 12.0
+        preview_talk.cut_end = 55.0
+        req_approve2 = schemas.ReviewRequest(decision=schemas.ReviewDecision.approve)
+        handle_approve(preview_talk, req_approve2, mock_db)
 
     # Verify mock_db.add was called multiple times, creating multiple ApprovedCut rows
     added_objs = [call[0][0] for call in mock_db.add.call_args_list]
@@ -1041,7 +1044,8 @@ def test_review_approve_multi_segment_creates_multiple_approved_cuts(
     ]
 
     req = schemas.ReviewRequest(decision=schemas.ReviewDecision.approve)
-    handle_approve(preview_talk, req, mock_db)
+    with patch("app.tasks.dispatch_assembly"):
+        handle_approve(preview_talk, req, mock_db)
 
     added_objs = [call[0][0] for call in mock_db.add.call_args_list]
     approved_cuts = [obj for obj in added_objs if isinstance(obj, models.ApprovedCut)]

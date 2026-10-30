@@ -395,6 +395,9 @@ class CutSegment(BaseModel):
         return float(_parse_time_value(self.start)), float(_parse_time_value(self.end))
 
 
+MAX_CUT_SEGMENTS: int = 50
+
+
 class CutBoundsRequest(BaseModel):
     cut_start: str | None = None  # "HH:MM:SS"
     cut_end: str | None = None  # "HH:MM:SS"
@@ -406,6 +409,10 @@ class CutBoundsRequest(BaseModel):
         if self.segments is not None:
             if len(self.segments) == 0:
                 raise ValueError("segments list cannot be empty")
+            if len(self.segments) > MAX_CUT_SEGMENTS:
+                raise ValueError(
+                    f"Number of cut segments ({len(self.segments)}) exceeds maximum allowed ({MAX_CUT_SEGMENTS})"
+                )
             parsed_segs = [seg.parsed_seconds() for seg in self.segments]
             for i in range(len(parsed_segs) - 1):
                 if parsed_segs[i][1] > parsed_segs[i + 1][0]:

@@ -2284,6 +2284,11 @@ async def attach_room_recording(
             if offset_end > offset_start:
                 talk.cut_start = offset_start
                 talk.cut_end = offset_end
+                talk.cut_segments = [{"start": offset_start, "end": offset_end}]
+            else:
+                talk.cut_start = None
+                talk.cut_end = None
+                talk.cut_segments = None
 
             talk_ids.append(talk.id)
 

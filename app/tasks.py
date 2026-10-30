@@ -62,6 +62,7 @@ from app.retention import (
     register_periodic_retention_sweep,  # noqa: F401
     run_retention_sweep,  # noqa: F401
 )
+from app.schemas import MAX_CUT_SEGMENTS
 from app.states import advance
 from app.storage import (
     StorageKeyNotFoundError,
@@ -412,6 +413,10 @@ def job_ingest_room_url(
                     talk.cut_start = offset_start
                     talk.cut_end = offset_end
                     talk.cut_segments = [{"start": offset_start, "end": offset_end}]
+                else:
+                    talk.cut_start = None
+                    talk.cut_end = None
+                    talk.cut_segments = None
 
                 if talk.id in job_ids:
                     job = db.get(Job, job_ids[talk.id])
@@ -531,6 +536,28 @@ def job_detect(
                 return
             talk.raw_duration_seconds = result.actual_duration_seconds
 
+            # Clear stale cut bounds or segments if they exceed newly detected duration
+            if result.actual_duration_seconds is not None and (
+                (
+                    talk.cut_end is not None
+                    and talk.cut_end > result.actual_duration_seconds + 0.001
+                )
+                or (
+                    talk.cut_start is not None
+                    and talk.cut_start >= result.actual_duration_seconds
+                )
+                or (
+                    talk.cut_segments
+                    and any(
+                        s.get("end", 0) > result.actual_duration_seconds + 0.001
+                        for s in talk.cut_segments
+                    )
+                )
+            ):
+                talk.cut_start = None
+                talk.cut_end = None
+                talk.cut_segments = None
+
             # Seed cut bounds from schedule offsets when not already set by user.
             # ponytail: only seeds when both are None; user edits are always preserved.
             if (
@@ -567,6 +594,10 @@ def job_detect(
                     talk.cut_start = offset_s
                     talk.cut_end = offset_e
                     talk.cut_segments = [{"start": offset_s, "end": offset_e}]
+                else:
+                    talk.cut_start = None
+                    talk.cut_end = None
+                    talk.cut_segments = None
 
             advance(talk, "pending_approval")
             job.status = "done"
@@ -588,6 +619,30 @@ def job_cut(talk_id: int, raw_key: str, cut_key: str | None = None) -> None:
                 raise ValueError(f"Talk {talk_id} not found")
             if talk.cut_start is None or talk.cut_end is None:
                 raise ValueError(f"Talk {talk_id} has no cut bounds set")
+            # Synchronize cut_segments with scalar bounds if missing, mismatched, or out of bounds
+            segments = talk.cut_segments
+            if (
+                not segments
+                or abs(segments[0].get("start", -1) - talk.cut_start) > 0.001
+                or abs(segments[-1].get("end", -1) - talk.cut_end) > 0.001
+                or any(
+                    s.get("start", 0) >= s.get("end", 0)
+                    or s.get("start", 0) < 0
+                    or (
+                        talk.raw_duration_seconds is not None
+                        and s.get("end", 0) > talk.raw_duration_seconds + 0.001
+                    )
+                    for s in segments
+                )
+            ):
+                segments = [{"start": talk.cut_start, "end": talk.cut_end}]
+                talk.cut_segments = segments
+
+            if len(segments) > MAX_CUT_SEGMENTS:
+                raise ValueError(
+                    f"Talk {talk_id} has {len(segments)} cut segments, exceeding maximum allowed {MAX_CUT_SEGMENTS}"
+                )
+
             job = Job(
                 talk_id=talk_id,
                 kind="cut",
@@ -599,9 +654,6 @@ def job_cut(talk_id: int, raw_key: str, cut_key: str | None = None) -> None:
             db.commit()
             db.refresh(job)
             job_id = job.id
-            segments = talk.cut_segments or [
-                {"start": talk.cut_start, "end": talk.cut_end}
-            ]
 
         raw_path = storage.get(raw_key)
 
@@ -641,6 +693,7 @@ def job_cut(talk_id: int, raw_key: str, cut_key: str | None = None) -> None:
                         seg_p,
                         seg["start"],
                         seg["end"],
+                        frame_accurate_fallback=True,
                         **cut_kwargs,
                     )
                     seg_paths.append(seg_p)
@@ -651,27 +704,51 @@ def job_cut(talk_id: int, raw_key: str, cut_key: str | None = None) -> None:
                     len(segments),
                     sum(s["end"] - s["start"] for s in segments),
                 )
-            _cache_waveform(storage, cut_key, tmp_out)
-            storage.put(cut_key, tmp_out)
+            with SessionLocal() as db:
+                talk = db.get(Talk, talk_id)
+                job = db.get(Job, job_id)
+                newer_cut_job = None
+                if hasattr(db, "query"):
+                    try:
+                        res = (
+                            db.query(Job)
+                            .filter(
+                                Job.talk_id == talk_id,
+                                Job.kind == "cut",
+                                Job.id > job_id,
+                            )
+                            .first()
+                        )
+                        if isinstance(res, Job) and getattr(res, "id", 0) > job_id:
+                            newer_cut_job = res
+                    except Exception:  # noqa: BLE001
+                        newer_cut_job = None
 
-        with SessionLocal() as db:
-            talk = db.get(Talk, talk_id)
-            job = db.get(Job, job_id)
-            if not talk or not job or talk.status != "cutting":
-                logger.info(
-                    "Talk %s cut job %s was aborted or state changed; discarding",
-                    talk_id,
-                    job_id,
-                )
-                if job:
-                    job.status = "cancelled"
-                    job.updated_at = datetime.now(UTC)
-                    db.commit()
-                return
-            advance(talk, "generating_previews")
-            job.status = "done"
-            job.updated_at = datetime.now(UTC)
-            db.commit()
+                if (
+                    not talk
+                    or not job
+                    or talk.status != "cutting"
+                    or getattr(job, "status", None) == "cancelled"
+                    or newer_cut_job is not None
+                ):
+                    logger.info(
+                        "Talk %s cut job %s was aborted or superseded; discarding",
+                        talk_id,
+                        job_id,
+                    )
+                    if job and getattr(job, "status", None) == "running":
+                        job.status = "cancelled"
+                        job.updated_at = datetime.now(UTC)
+                        db.commit()
+                    return
+
+                _cache_waveform(storage, cut_key, tmp_out)
+                storage.put(cut_key, tmp_out)
+
+                advance(talk, "generating_previews")
+                job.status = "done"
+                job.updated_at = datetime.now(UTC)
+                db.commit()
 
         preview_key = f"{talk_id}/preview/preview.mp4"
         light_queue.enqueue(
